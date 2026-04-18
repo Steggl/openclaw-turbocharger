@@ -104,3 +104,40 @@ Revisions add a new entry that supersedes the old one rather than rewriting hist
   `tsconfig.json`, new `tsconfig.build.json`, `tsup.config.ts`, and
   `.github/workflows/ci.yml`. The HTTP framework decision originally
   pencilled in as ADR-0002 becomes ADR-0003 and lands with issue #2.
+
+## ADR-0003: HTTP framework choice
+
+- **Date:** 2026-04-18
+- **Status:** accepted
+- **Decision:** Use [`hono`](https://hono.dev) with `@hono/node-server` as
+  the HTTP layer for the sidecar's OpenAI-compatible server. Two new
+  runtime dependencies; runtime-dep budget (brief §8: under five) stays
+  comfortably under target.
+- **Rationale:** Hono is built on the Web Fetch API (`Request` /
+  `Response` / `ReadableStream`), which matches the shape of the
+  pass-through proxy almost exactly — the upstream client's request body
+  and headers map directly to a `fetch()` call against the downstream
+  target, and the downstream's streaming `Response.body` can be returned
+  unchanged. Hono ships with zero transitive dependencies of its own,
+  and `@hono/node-server` is a thin adapter onto `node:http`. Tests can
+  exercise the app via `app.fetch(request)` without binding a port,
+  which keeps the proxy test suite hermetic. The router primitive will
+  also absorb the additional endpoints expected from later issues
+  (`/v1/models`, header-based per-request overrides from issue #12,
+  health/readiness) without restructuring.
+- **Alternatives considered:**
+  - _Raw `node:http`._ Rejected. Workable for a single endpoint but
+    forces hand-rolled header copying, body buffering vs. piping
+    decisions, and streaming back-pressure handling that Hono gives for
+    free via the Fetch streaming APIs. The dependency saving (zero vs.
+    two) is real but small in absolute terms and the budget allows it.
+  - _`itty-router`._ Rejected. Comparable size, but less idiomatic on
+    Node for streaming bodies (designed primarily for edge runtimes
+    where body handling differs) and no first-class Node adapter
+    matching `@hono/node-server`.
+  - _`fastify` / `express`._ Rejected. Both pull in significantly more
+    surface area than the project's "minimal magic, minimal deps" stance
+    in brief §8 warrants for what is structurally a thin proxy.
+- **Related:** issue #2 (`feat/2-core-http-server`); the
+  `feat(core): …` commit on that branch introduces the dependencies and
+  the initial server / proxy modules.
