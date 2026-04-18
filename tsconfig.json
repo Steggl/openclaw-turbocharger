@@ -9,6 +9,11 @@
     "strict": true,
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
 
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -16,10 +21,6 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "resolveJsonModule": true,
-
-    "declaration": true,
-    "sourceMap": true,
-    "outDir": "dist",
 
     "noEmit": true
   },
