@@ -1,0 +1,39 @@
+# openclaw-turbocharger — standalone config example
+#
+# Status: ILLUSTRATIVE. This example mirrors the shape in PROJECT_BRIEF.md §5
+# but is not yet validated against a live schema (schema lands with issue #11).
+# Keys and types may still change before v0.1.0-alpha.
+
+turbocharger:
+  # Which escalation strategy fires on critic-fail.
+  # ladder | max | chorus
+  default_escalation: ladder
+
+  # Ordered chain used by the `ladder` strategy. Each step is a model id
+  # the downstream target understands.
+  ladder:
+    - ollama/qwen2.5:7b
+    - anthropic/claude-haiku-4-5
+    - anthropic/claude-sonnet-4-6
+    - anthropic/claude-opus-4-7
+
+  # Target used by the `max` strategy (single jump).
+  max_model: anthropic/claude-opus-4-7
+
+  # Set when openclaw-chorus is available. Null → chorus mode falls back to `max`.
+  chorus_endpoint: null
+
+  # Maximum consecutive escalations per request (prevents runaway costs).
+  max_escalation_depth: 2
+
+  critic:
+    # hard_only | hybrid | llm_only
+    strategy: hybrid
+    # Model used by the LLM-critic when strategy is hybrid or llm_only.
+    llm_model: ollama/qwen2.5:7b
+    # Cost ceiling per request for the LLM-critic. Exceeded → hard-signal-only.
+    critic_budget_usd: 0.01
+
+  transparency:
+    # banner | silent | card
+    default: banner

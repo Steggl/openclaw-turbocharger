@@ -1,0 +1,23 @@
+{
+  "_note": "ILLUSTRATIVE example config — JSON variant of examples/standalone-config.example.yaml. Not yet validated against a live schema (schema lands with issue #11). Keys and types may change before v0.1.0-alpha.",
+  "turbocharger": {
+    "default_escalation": "ladder",
+    "ladder": [
+      "ollama/qwen2.5:7b",
+      "anthropic/claude-haiku-4-5",
+      "anthropic/claude-sonnet-4-6",
+      "anthropic/claude-opus-4-7"
+    ],
+    "max_model": "anthropic/claude-opus-4-7",
+    "chorus_endpoint": null,
+    "max_escalation_depth": 2,
+    "critic": {
+      "strategy": "hybrid",
+      "llm_model": "ollama/qwen2.5:7b",
+      "critic_budget_usd": 0.01
+    },
+    "transparency": {
+      "default": "banner"
+    }
+  }
+}
