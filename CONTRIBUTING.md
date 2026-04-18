@@ -8,7 +8,7 @@ Until then, the short version:
 - **Open an issue before starting non-trivial work.** One issue per logical
   change. Don't combine #2 with #3 in a single PR.
 - **Conventional Commits.** Examples: `feat(critic): implement hard-signal
-  detector`, `fix(proxy): preserve request-id header on forward`,
+detector`, `fix(proxy): preserve request-id header on forward`,
   `docs(readme): clarify escalation modes`.
 - **TypeScript strict mode.** No `any` without a comment explaining why.
 - **Runtime dependencies are deliberately kept minimal.** Target: fewer than

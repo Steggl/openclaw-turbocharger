@@ -43,13 +43,13 @@ Revisions add a new entry that supersedes the old one rather than rewriting hist
   intent — "the current Active LTS" — is preserved; only the version number
   is updated.
 - **Alternatives considered:**
-  - *Stay on Node 20 until its scheduled maintenance-EOL.* Rejected: the
+  - _Stay on Node 20 until its scheduled maintenance-EOL._ Rejected: the
     remaining support window is too short to justify the carry, and any new
     contributor would install Node 20 on a machine that would outlive it.
-  - *Jump straight to Node 24.* Rejected: Node 24 was not the Active LTS at
+  - _Jump straight to Node 24._ Rejected: Node 24 was not the Active LTS at
     the time of this decision; defaulting to the current Active LTS is the
     more defensive baseline. Revisit when Node 24 is promoted.
-  - *Matrix-test both 20 and 22.* Rejected for this scaffold step: the
+  - _Matrix-test both 20 and 22._ Rejected for this scaffold step: the
     project has no runtime dependencies yet and no Node-20-specific code
     paths, so there is nothing to validate against 20 today. The matrix
     structure is in place in `ci.yml`; adding versions is a one-line edit.
@@ -88,16 +88,16 @@ Revisions add a new entry that supersedes the old one rather than rewriting hist
      lands before typecheck so a formatting-only failure doesn't hide real
      type errors on the same commit.
 - **Alternatives considered:**
-  - *Single `tsconfig.json` with a `references`-based project setup.*
+  - _Single `tsconfig.json` with a `references`-based project setup._
     Rejected for the current size: project references add ceremony that
     pays off only when there are multiple compilation units. Revisit if
     we ever split the workspace.
-  - *Rely on ESLint for unused-locals / unused-params only, not TypeScript.*
+  - _Rely on ESLint for unused-locals / unused-params only, not TypeScript._
     Rejected: the two checkers disagree in edge cases, and having the
     compiler itself refuse to emit on unused bindings is the stronger
     guarantee. Both layers stay on; the `_`-prefix escape hatch works
     under both.
-  - *Leave formatting drift to a pre-commit hook only.* Rejected: hooks
+  - _Leave formatting drift to a pre-commit hook only._ Rejected: hooks
     are optional per contributor. CI is the one place the check is
     unavoidable.
 - **Related:** chore commit `chore: harden scaffold` touching

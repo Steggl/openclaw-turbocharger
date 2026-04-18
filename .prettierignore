@@ -1,0 +1,14 @@
+# Auto-generated
+pnpm-lock.yaml
+package-lock.json
+node_modules/
+dist/
+coverage/
+
+# Hand-maintained with deliberate formatting
+PROJECT_BRIEF.md
+LICENSE
+
+# Build artifacts
+*.tsbuildinfo
+.turbo/
