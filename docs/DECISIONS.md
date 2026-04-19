@@ -158,8 +158,8 @@ Revisions add a new entry that supersedes the old one rather than rewriting hist
   a reference chart, map cleanly onto how providers actually structure
   their offerings, and make the lifecycle-management feature (ADR-0006)
   tractable — three slots are trackable, an arbitrary chain is not. The
-  `max` and `chorus` escalation *modes* from brief §5 remain; they now
-  describe the escalation *target* (one jump to `complex` vs. chorus
+  `max` and `chorus` escalation _modes_ from brief §5 remain; they now
+  describe the escalation _target_ (one jump to `complex` vs. chorus
   dispatch) rather than alternative ladder shapes.
 - **Alternatives considered:**
   - _Keep the configurable ladder from the brief._ Rejected: flexibility
@@ -288,7 +288,7 @@ Revisions add a new entry that supersedes the old one rather than rewriting hist
   4. **Audit log** (JSONL, privacy-by-default: hashed prompts and
      decision metadata only, verbose mode opt-in with separate
      retention) — for forensics and compliance.
-  Clients that don't recognize a layer ignore it gracefully.
+     Clients that don't recognize a layer ignore it gracefully.
 - **Rationale:** Brief §7 addresses the end-user with three modes but
   leaves integrators, monitoring tools, and auditors without suitable
   data channels. Each audience has different needs: humans want
