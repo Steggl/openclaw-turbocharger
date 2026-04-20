@@ -428,3 +428,158 @@ Revisions add a new entry that supersedes the old one rather than rewriting hist
   commit `79c9a61` (rebased to `e7a1f39` on main) as part of PR #3.
   This ADR retroactively records the decision; no further code
   change is needed.
+
+## ADR-0010: LLM-critic triggers only inside the grey band of the hard-signal aggregate
+
+- **Date:** 2026-04-20
+- **Status:** accepted
+- **Decision:** The orchestrator (issue #5) invokes the LLM-critic only
+  when the noisy-OR aggregate of the hard-signal detectors (ADR-0006)
+  lands in the configurable grey band, default `[0.30, 0.60)`. Aggregates
+  below `0.30` skip the LLM-critic because the response is clearly
+  adequate; aggregates at or above `0.60` skip it because the
+  escalation threshold has already been crossed and a second opinion
+  would only add cost.
+- **Rationale:** The brief §4 describes the LLM-critic as running "only
+  when hard-signals return 'no clear failure' AND a confidence
+  threshold says the answer is borderline". That rule is stated in
+  boolean terms; ADR-0006 moved the hard-signal pipeline to
+  continuous confidence and a noisy-OR aggregate. Translating "no
+  clear failure" and "borderline" onto that continuous scale produces
+  a band: the lower edge marks "confidently adequate, no point
+  checking further", and the upper edge is simply the escalation
+  threshold itself (whatever a future configuration sets it to).
+  Running the critic outside the band is always wasteful: below the
+  lower edge the escalation would not fire regardless; at or above the
+  upper edge it fires on the hard-signal evidence alone. Inside the
+  band, the LLM-critic earns its keep — it catches the subtle
+  inadequacy cases that the hard-signal heuristics miss, without
+  running on every request.
+- **Alternatives considered:**
+  - _Run the LLM-critic on every request below the escalation
+    threshold._ Rejected: pays for a small-model inference call on
+    every confidently-adequate response. At any realistic volume the
+    cumulative cost overwhelms the savings from cheaper-model-first.
+  - _Run the LLM-critic on every request, regardless of hard-signal
+    aggregate._ Rejected more strongly: same objection, worse.
+    Belongs in a user-selectable "always second-opinion" mode,
+    post-MVP.
+  - _Run only when the aggregate is exactly at the threshold within
+    a small epsilon._ Rejected: the grey band is the epsilon, just
+    with an explicit floor and ceiling. An epsilon framing without
+    named bounds would be harder to reason about and harder to
+    calibrate later.
+- **Related:** issue #4 (this commit introduces the critic; the
+  orchestrator that applies the band gating lands in issue #5); the
+  default `[0.30, 0.60)` can be revised when post-MVP calibration data
+  exists.
+
+## ADR-0011: LLM-critic verdict is a separate threshold check, not mixed into the noisy-OR pool
+
+- **Date:** 2026-04-20
+- **Status:** accepted
+- **Decision:** The {@link LlmVerdict} returned by the critic is
+  evaluated against the escalation threshold independently of the
+  hard-signal noisy-OR aggregate. Escalation fires when
+  `(hard_signal_aggregate >= threshold) || (verdict === 'fail' &&
+  verdict.confidence >= threshold)`. A pass verdict never triggers
+  escalation regardless of confidence. The critic does not contribute
+  a `Signal` to the hard-signal pool.
+- **Rationale:** Hard-signal detectors and the LLM-critic supply
+  structurally different evidence. Hard signals are independent
+  heuristics over surface features (refusal phrasing, truncation,
+  repetition, empty response, tool error, syntax error); noisy-OR is
+  the right combinator because each detector fires on its own
+  evidence channel. The LLM-critic's output is holistic — a single
+  verdict on the whole response — and it is not independent of the
+  hard signals: the same refusal phrasing that fires the refusal
+  detector is also visible to the critic. Mixing them into one pool
+  double-counts that evidence and gives the critic outsized weight
+  (at confidence 0.80, a single LLM-critic vote would alone cross
+  the default threshold regardless of what any hard-signal detector
+  found). Keeping them in separate tracks makes the escalation
+  condition explicit and easier to reason about, and it lets each
+  track be tuned independently (the grey-band cut-offs in ADR-0010
+  do not need to stay in sync with hard-signal weights in issue #11).
+- **Alternatives considered:**
+  - _Add an `llm_critic` category to the hard-signal pool._
+    Rejected: double-counts evidence the hard signals already saw,
+    and gives a single high-confidence vote disproportionate weight
+    under noisy-OR.
+  - _Keep the pool but weight the critic signal down._ Rejected:
+    trades one calibration problem for another. The principled
+    answer is separate tracks, not a magic weight.
+  - _Replace the hard-signal pool with the critic whenever the
+    critic fires._ Rejected: throws away real evidence from the
+    deterministic detectors, and couples escalation to a
+    probabilistic external call.
+- **Related:** issue #4 (this commit introduces the verdict type);
+  issue #5 implements the two-track threshold comparison.
+
+## ADR-0012: LLM-critic v0.1 implementation — no cloud defaults, locale-keyed prompts (EN + DE), tolerant parsing
+
+- **Date:** 2026-04-20
+- **Status:** accepted
+- **Decision:** Three coupled implementation details of the v0.1
+  LLM-critic.
+  1. No defaults are baked in for the critic's `baseUrl` or `model`.
+     Callers must supply both explicitly. Budget enforcement is
+     opt-in (requires both `budgetUsd` and `pricing`).
+  2. Prompt templates are locale-keyed: English and German shipped,
+     English selected for unknown locales. The system prompt in each
+     template explicitly tells the critic that the user and assistant
+     may converse in any language and that the verdict JSON is always
+     in English with fixed field names.
+  3. Verdict extraction is deliberately tolerant: first a
+     ```` ```json ```` fence, then the first-`{`-to-last-`}`
+     substring, then the whole response body parsed as JSON. Each
+     strategy falls through to the next if either `JSON.parse` or
+     shape validation fails.
+- **Rationale:**
+  1. _No cloud defaults._ A silent default for the cloud critic
+     endpoint would cause a misconfigured turbocharger to fire
+     inference calls against whatever provider we happened to pin as
+     "the default", at unexpected cost to the user. Explicit
+     configuration forces the user to acknowledge the billing
+     relationship. Local-default candidates (e.g. an Ollama endpoint
+     on `http://localhost:11434/v1` with `qwen2.5:7b`) are slightly
+     less dangerous but still a stealth-dependency; an
+     `examples/standalone-config.example.yaml` fragment in a later
+     issue is the right home for them.
+  2. _Locale-keyed prompts._ ADR is consistent with issue #3's
+     locale-aware refusal patterns. A critic prompted in the user's
+     language pays less risk of misreading colloquial or
+     idiomatically-phrased content. The fallback-to-English keeps
+     unknown locales functional. The English verdict-JSON
+     requirement is a deliberate simplification: field names do not
+     vary by locale, so the extractor stays language-agnostic.
+  3. _Tolerant parsing._ Real-world LLMs frequently emit prose
+     before or after the JSON (e.g. "Here is my verdict: {...}") or
+     wrap it in a code fence. A strict `JSON.parse` on the whole
+     content would classify these as `parse_failure` and the
+     orchestrator would drop a perfectly usable verdict. Fence-first
+     is the best-hit path (fences are unambiguous when present);
+     brackets-second handles prose wrapping; direct parse last is
+     the unwrapped happy path that comes at no extra cost.
+- **Alternatives considered:**
+  - _Ship a default cloud endpoint (e.g. Anthropic or OpenAI) to
+    smooth first-run setup._ Rejected for silent billing reasons.
+  - _Ship defaults for Ollama only, not cloud._ Considered; this
+    sits in `examples/standalone-config.example.yaml` instead, so
+    the default is visible as documentation rather than hard-coded.
+  - _Single English-only prompt._ Rejected for consistency with
+    ADR-0012's (_sic — ADR-0012 is this one; the reference intended
+    is ADR-0006's noisy-OR localization stance and issue #3's
+    locale detectors_) locale awareness and for the risk of
+    misreading German idiom.
+  - _Strict `JSON.parse` only._ Rejected: measurable rate of
+    recoverable critic outputs would become spurious errors.
+  - _A structured-outputs API (OpenAI's JSON mode or Anthropic's
+    tool-use)._ Rejected for v0.1: couples the critic to a specific
+    provider's feature. Tolerant parsing lets the critic run
+    against any OpenAI-compatible endpoint, including Ollama.
+- **Related:** issue #4. Post-MVP candidates: a
+  structured-outputs-aware config flag that activates provider-native
+  JSON mode when available (keeps tolerant parsing as fallback); a
+  configurable prompt-template override for users who want custom
+  critic behaviour.
