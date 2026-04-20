@@ -151,11 +151,21 @@ function extractVerdict(content: string): LlmVerdict | null {
     if (verdict !== null) return verdict;
   }
 
-  // 2. First `{` to last `}`
-  const firstBrace = content.indexOf('{');
-  const lastBrace = content.lastIndexOf('}');
+  // 2. First `{` to last `}`, but exclude the fence region if a fence
+  //    was matched (even when its content failed to parse). Otherwise
+  //    the malformed fence body confuses the naive bracket span: its
+  //    opening `{` becomes the scan start and its broken content ends
+  //    up spanning into any valid JSON that follows, producing a
+  //    composite string that never parses.
+  const scanSource =
+    fenceMatch !== null
+      ? content.slice(0, fenceMatch.index) +
+        content.slice(fenceMatch.index + fenceMatch[0].length)
+      : content;
+  const firstBrace = scanSource.indexOf('{');
+  const lastBrace = scanSource.lastIndexOf('}');
   if (firstBrace >= 0 && lastBrace > firstBrace) {
-    const verdict = tryParseVerdict(content.slice(firstBrace, lastBrace + 1));
+    const verdict = tryParseVerdict(scanSource.slice(firstBrace, lastBrace + 1));
     if (verdict !== null) return verdict;
   }
 
