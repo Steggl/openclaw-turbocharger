@@ -3,16 +3,10 @@ import type { AddressInfo } from 'node:net';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { startServer, type RunningServer } from '../src/server.js';
-import type {
-  DecisionLogEntry,
-  OrchestratorConfig,
-  SignalWeights,
-} from '../src/types.js';
+import { startServer, type DecisionLogEntry, type RunningServer } from '../src/server.js';
+import type { OrchestratorConfig, SignalWeights } from '../src/types.js';
 
-// Re-declare here because src/server.ts does not re-export DecisionLogEntry
-// via a type-only barrel.
-// NOTE: Keep this in sync with the DecisionLogEntry in src/server.ts.
+// Alias for brevity.
 type LogEntry = DecisionLogEntry;
 
 // ---------------------------------------------------------------------------
