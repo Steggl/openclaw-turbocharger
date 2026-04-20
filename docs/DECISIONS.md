@@ -374,3 +374,57 @@ Revisions add a new entry that supersedes the old one rather than rewriting hist
   transparency layer (ADR-0007) and the audit log need no changes
   when the multi-language version lands; new languages extend the
   detector, not the type surface.
+
+## ADR-0009: Local check pipeline with granular CI
+
+- **Date:** 2026-04-20
+- **Status:** accepted
+- **Decision:** Local verification and CI verification use the same
+  underlying scripts (`lint`, `format:check`, `typecheck`, `test`,
+  `build`) but compose them differently. Locally, `pnpm check` runs
+  Prettier-write and ESLint-autofix first, then the read-only gates in
+  the same order CI runs them. A separate `pnpm check:ci` script runs
+  only the read-only gates — it exists so contributors can reproduce
+  CI behaviour locally, but the CI workflow itself does **not** call
+  it; the workflow keeps its five granular steps (`Lint`,
+  `Format check`, `Typecheck`, `Test`, `Build`).
+- **Rationale:** Issues #2 and #3 each produced a prettier-drift
+  fixup commit after the feature work, because the patches were
+  prepared in an environment where Prettier was not available to
+  normalize output. Making `pnpm check` the default pre-commit
+  command — auto-fix first, then strict verification — eliminates
+  that pattern: running it once before committing guarantees format
+  and lint hygiene without a follow-up commit. At the same time, the
+  CI workflow benefits from keeping each verification stage as its
+  own named step: GitHub Actions highlights the failing step in the
+  run summary, so a contributor opening a red CI run sees at a glance
+  whether the problem is type errors, test failures, or build errors.
+  Collapsing to a single `pnpm check:ci` step would save roughly ten
+  lines of YAML but force everyone reviewing a red run to scroll
+  through logs to identify which gate failed. The trade is small on
+  one side and real on the other, so the lines of YAML stay.
+- **Alternatives considered:**
+  - _Collapse CI to a single `pnpm check:ci` step._ Rejected as
+    described above: modest YAML reduction, measurable diagnostic
+    cost.
+  - _Drop `pnpm check:ci` entirely, keep only `pnpm check`._
+    Rejected: without `check:ci`, reproducing the exact CI pipeline
+    locally requires typing out five commands joined by `&&`.
+    Contributors investigating a CI failure want a one-liner. The
+    two-script split (fix-then-verify locally, verify-only for
+    reproduction) is cheap and covers both cases.
+  - _Run `pnpm check` in CI._ Rejected: CI should never rewrite
+    files. Prettier-write and ESLint-autofix in CI would either
+    silently mask contributor format drift (if the rewritten files
+    are discarded) or create a mutation loop (if they are committed
+    back). The `check:ci` script guarantees the read-only stance by
+    construction.
+  - _Git pre-commit hook that runs `pnpm check`._ Deferred, not
+    rejected. Hooks are per-contributor opt-in and require
+    installation setup; `pnpm check` as a documented one-liner is a
+    lower-friction first step. A post-MVP issue can add a husky /
+    simple-git-hooks wiring if contributor volume ever justifies it.
+- **Related:** Introduced on branch `feat/3-critic-hard-signals` in
+  commit `79c9a61` (rebased to `e7a1f39` on main) as part of PR #3.
+  This ADR retroactively records the decision; no further code
+  change is needed.
