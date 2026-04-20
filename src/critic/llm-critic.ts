@@ -99,15 +99,11 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-function estimateCostUsd(
-  promptChars: number,
-  pricing: ModelPricing,
-): number {
+function estimateCostUsd(promptChars: number, pricing: ModelPricing): number {
   const inputTokens = estimateTokens(' '.repeat(promptChars));
   const outputTokens = ASSUMED_OUTPUT_TOKENS;
   return (
-    (inputTokens * pricing.inputUsdPerMillion +
-      outputTokens * pricing.outputUsdPerMillion) /
+    (inputTokens * pricing.inputUsdPerMillion + outputTokens * pricing.outputUsdPerMillion) /
     1_000_000
   );
 }
@@ -224,8 +220,7 @@ async function fetchVerdictResponse(
     clearTimeout(timer);
     const message = err instanceof Error ? err.message : String(err);
     // AbortError has name 'AbortError' but message varies across runtimes.
-    const isAbort =
-      err instanceof Error && (err.name === 'AbortError' || /abort/i.test(message));
+    const isAbort = err instanceof Error && (err.name === 'AbortError' || /abort/i.test(message));
     return {
       kind: 'error',
       reason: isAbort ? 'timeout' : 'network',

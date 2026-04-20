@@ -251,9 +251,7 @@ describe('runLlmCritic', () => {
   });
 
   it('runs when budget is configured but the estimated cost is under budgetUsd', async () => {
-    const fetchImpl = mockFetchReturning(
-      '{"verdict":"pass","confidence":0.9,"reason":"ok"}',
-    );
+    const fetchImpl = mockFetchReturning('{"verdict":"pass","confidence":0.9,"reason":"ok"}');
     const result = await runLlmCritic(
       makeInput(),
       makeConfig({

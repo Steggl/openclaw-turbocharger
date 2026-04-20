@@ -482,7 +482,7 @@ Revisions add a new entry that supersedes the old one rather than rewriting hist
   evaluated against the escalation threshold independently of the
   hard-signal noisy-OR aggregate. Escalation fires when
   `(hard_signal_aggregate >= threshold) || (verdict === 'fail' &&
-  verdict.confidence >= threshold)`. A pass verdict never triggers
+verdict.confidence >= threshold)`. A pass verdict never triggers
   escalation regardless of confidence. The critic does not contribute
   a `Signal` to the hard-signal pool.
 - **Rationale:** Hard-signal detectors and the LLM-critic supply
@@ -531,7 +531,7 @@ Revisions add a new entry that supersedes the old one rather than rewriting hist
      may converse in any language and that the verdict JSON is always
      in English with fixed field names.
   3. Verdict extraction is deliberately tolerant: first a
-     ```` ```json ```` fence, then the first-`{`-to-last-`}`
+     ` ```json ` fence, then the first-`{`-to-last-`}`
      substring, then the whole response body parsed as JSON. Each
      strategy falls through to the next if either `JSON.parse` or
      shape validation fails.
