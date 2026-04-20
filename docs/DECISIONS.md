@@ -583,3 +583,137 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
   JSON mode when available (keeps tolerant parsing as fallback); a
   configurable prompt-template override for users who want custom
   critic behaviour.
+
+## ADR-0013: Adequacy checks are skipped for streaming responses in v0.1
+
+- **Date:** 2026-04-20
+- **Status:** accepted
+- **Decision:** When the client requests a streaming completion
+  (`stream: true`), the pipeline forwards the response unchanged to
+  the client, skips the orchestrator entirely, and records the skip
+  with `{ kind: 'skipped', reason: 'streaming' }`. The
+  `X-Turbocharger-Decision: skipped` header is set; no other
+  transparency layer runs.
+- **Rationale:** Streaming responses are `ReadableStream`s that must
+  reach the client before the assistant's content is assembled end
+  to end. Running the orchestrator against them requires either (a)
+  buffering the entire stream before forwarding — which breaks the
+  streaming contract and is guarded by the existing
+  `test/proxy.test.ts` streaming assertion; (b) duplicating the
+  stream with `.tee()` so one half streams to the client and the
+  other accumulates for the orchestrator — which means the decision
+  is only available *after* the stream has finished, long past the
+  HTTP headers, requiring trailers (poorly supported across clients)
+  or body-level SSE events (which contradicts the "no body
+  modification" posture we chose for v0.1, ADR-0007's in-stream
+  layer is Issue #9's territory); or (c) a stream-accumulator that
+  inspects a prefix and decides synchronously — which would need a
+  different, partial-response critic that we have not designed.
+  Option (a) is incompatible with the existing streaming contract;
+  (b) and (c) are each worth their own design round. Skipping for
+  v0.1 is honest: we surface the skip in headers and logs so
+  monitoring can track how often it happens, which gives us data for
+  a post-MVP design decision on streaming critics.
+- **Alternatives considered:**
+  - _Buffer the stream, run the critic, then forward._ Rejected:
+    breaks the streaming contract that issue #2 explicitly tested
+    and that users with latency-sensitive UIs depend on.
+  - _Tee the stream, decide after stream end, emit HTTP trailers._
+    Rejected for v0.1: trailer support in clients (`curl` without
+    `--raw`, browsers, many SDKs) is inconsistent. A decision
+    delivered via trailer is, for most consumers, no decision at
+    all.
+  - _Tee the stream, append a terminal SSE event with the
+    decision._ Rejected for v0.1: modifies the response body, which
+    this issue's design explicitly avoids (pipeline is pass-through
+    for bytes; transparency is via headers and logs only). Can be
+    revisited in Issue #9 alongside the banner/card modes, which do
+    modify the body by design.
+  - _Prefix-inspection critic that decides on the first N tokens._
+    Rejected: the adequacy heuristics (refusal, truncation,
+    repetition) reason about the whole response. A prefix critic
+    would be a different, more speculative detector that we have
+    not calibrated.
+- **Related:** issue #5 pipeline implementation; future post-MVP
+  work on streaming adequacy checks would revisit this ADR.
+
+## ADR-0014: Orchestrator is a pure function, not an object
+
+- **Date:** 2026-04-20
+- **Status:** accepted
+- **Decision:** `runOrchestrator(input, config): Promise<Decision>`
+  is a pure function. Configuration is passed per call rather than
+  captured in a constructor. No internal state is held between
+  calls.
+- **Rationale:** In v0.1 the orchestrator is genuinely stateless:
+  every invocation runs the hard-signal detectors, aggregates via
+  noisy-OR, and optionally invokes a caller-supplied LLM-critic.
+  None of that benefits from being a method on an object with
+  shared state. A pure function is simpler to test (no setup /
+  teardown), easier to reason about (the config is visible at every
+  call site), and trivially composable with the pipeline (which is
+  also a function). Should a future iteration accumulate state
+  across calls — a per-session cost counter, a decision-history
+  cache, a calibration-tracking layer — an `Orchestrator` class
+  wrapping this function is straightforward to build later. The
+  reverse (pulling state out of a class into separate function
+  arguments after it has already been used) is disproportionately
+  harder.
+- **Alternatives considered:**
+  - _`new Orchestrator(config).evaluate(input)`._ Rejected: the
+    kept-config ergonomic win is small when the caller is a single
+    pipeline that already holds the config anyway.
+  - _Closure-based factory: `createOrchestrator(config) =>
+    (input) => Decision`._ Rejected: hides the config dependency
+    from stack traces and test-setup, for the same closure-bound
+    ergonomic as the class form with none of the class's
+    discoverability.
+  - _Pass config as a top-level module export, set once at boot._
+    Rejected strongly: makes tests non-hermetic, couples unrelated
+    orchestrator invocations.
+- **Related:** issue #5 implementation; future post-MVP state work
+  (cost accounting, calibration) can wrap this function without
+  changing its public surface.
+
+## ADR-0015: The pipeline is a separate module, not a proxy feature
+
+- **Date:** 2026-04-20
+- **Status:** accepted
+- **Decision:** The code that runs the orchestrator against proxy
+  responses lives in `src/pipeline.ts`, a new top-level module.
+  `src/proxy.ts` remains responsible only for HTTP forwarding and
+  does not import the orchestrator or any critic. `src/server.ts`
+  composes the two: when an `orchestratorConfig` is supplied via
+  `AppDeps`, the request flows through `runPipeline`; otherwise
+  through `forwardChatCompletion` directly.
+- **Rationale:** The proxy's job is narrow and testable —
+  RFC-compliant forwarding, header hygiene, streaming passthrough.
+  Folding the adequacy check into the same file would force
+  `proxy.ts` to know about Signals, LlmVerdicts, noisy-OR, grey
+  bands, and X-Turbocharger headers. That is four layers of
+  concerns entangled in one file, and it makes proxy-level changes
+  (e.g. a different fetch implementation, an HTTP/2 upgrade) risky
+  because they would also touch critic code. Keeping the two
+  responsibilities separate costs one extra file and one import in
+  `server.ts`; it wins an explicit seam that can be tested, mocked,
+  and replaced independently. The pipeline module is also where
+  the issue #6 escalation machinery will plug in: after the
+  decision is made, it will optionally trigger a ladder/max
+  re-query before returning to the client. Having that all live
+  alongside the forwarding logic would continue entangling the
+  proxy.
+- **Alternatives considered:**
+  - _Add a critic hook to `forwardChatCompletion`._ Rejected: see
+    above.
+  - _Put the pipeline inline in `server.ts`._ Rejected: the server
+    already does HTTP routing, logging, and startup; adding the
+    orchestrator composition to it would make the file a
+    multi-concern hub.
+  - _Expose a class-based middleware_ (e.g. Hono middleware
+    function) _instead of a standalone module._ Considered; deferred
+    until Issue #6 (escalation) is done, because the middleware's
+    shape depends on how escalation changes the response flow.
+    When we know the final shape, we can convert the module to a
+    middleware if that simplification pays for itself.
+- **Related:** issue #5 pipeline module; issue #6 escalation will
+  extend `runPipeline` to act on `escalate` decisions.
