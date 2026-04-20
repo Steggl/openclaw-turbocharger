@@ -159,8 +159,7 @@ function extractVerdict(content: string): LlmVerdict | null {
   //    composite string that never parses.
   const scanSource =
     fenceMatch !== null
-      ? content.slice(0, fenceMatch.index) +
-        content.slice(fenceMatch.index + fenceMatch[0].length)
+      ? content.slice(0, fenceMatch.index) + content.slice(fenceMatch.index + fenceMatch[0].length)
       : content;
   const firstBrace = scanSource.indexOf('{');
   const lastBrace = scanSource.lastIndexOf('}');
