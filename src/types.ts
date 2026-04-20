@@ -2,7 +2,8 @@
 // truth so that proxy / critic / escalation / transparency stay structurally
 // consistent. Issue #2 introduces the minimal surface needed for the
 // pass-through proxy; issue #3 adds the hard-signal detection surface;
-// issue #4 adds the LLM-critic surface; later issues extend further.
+// issue #4 adds the LLM-critic surface; issue #5 adds the orchestrator and
+// pipeline surfaces; later issues extend further.
 
 /**
  * Effective configuration for a running sidecar process.
@@ -213,3 +214,100 @@ export type LlmCritic = (
   input: LlmCriticInput,
   config: LlmCriticConfig,
 ) => Promise<LlmCriticResult>;
+
+// ---------------------------------------------------------------------------
+// Orchestrator and pipeline (issue #5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-category weight for the hard-signal noisy-OR aggregation. Each
+ * weight is a multiplier applied to the signal's confidence before the
+ * noisy-OR combination:
+ * `P(inadequate) = 1 - prod(1 - weight_i * confidence_i)`.
+ * A weight of `0` disables the category. Weights outside [0, 1] are
+ * clamped by the aggregator.
+ */
+export type SignalWeights = Readonly<Record<SignalCategory, number>>;
+
+/**
+ * Configuration passed to {@link runOrchestrator}. No Zod validation
+ * yet — issue #11 introduces the full config schema. Sensible defaults
+ * are documented but the orchestrator does not supply them; callers
+ * must construct a complete config.
+ */
+export interface OrchestratorConfig {
+  /**
+   * Escalation threshold: when the noisy-OR aggregate crosses this (or
+   * the LLM-critic's fail confidence does, per ADR-0011), the decision
+   * is `escalate`. Default recommendation: 0.6 (see ADR-0006).
+   */
+  readonly threshold: number;
+  /** Per-category weights for the hard-signal aggregator. */
+  readonly weights: SignalWeights;
+  /**
+   * Grey band [lower, upper) in which the LLM-critic, if configured,
+   * is invoked. Outside the band, the critic is skipped. Per ADR-0010
+   * the default is `[0.30, 0.60)`.
+   */
+  readonly greyBand: readonly [number, number];
+  /**
+   * Optional LLM-critic invocation. When absent, the orchestrator runs
+   * hard-signals only. When present, the callable is invoked when the
+   * noisy-OR aggregate lands in the grey band.
+   */
+  readonly llmCritic?: {
+    readonly run: LlmCritic;
+    readonly config: LlmCriticConfig;
+  };
+}
+
+/**
+ * Input passed to {@link runOrchestrator}. Same fields as
+ * {@link DetectorInput}, plus the finish_reason pass-through.
+ */
+export interface OrchestratorInput {
+  readonly response: string;
+  readonly userPrompt: string;
+  readonly finishReason?: string;
+  readonly locale?: string;
+}
+
+/**
+ * Discriminated decision produced by {@link runOrchestrator}. The kind
+ * drives what the pipeline does next:
+ *
+ * - `pass`: no escalation. Response is forwarded unchanged.
+ * - `escalate`: adequacy fell short. Escalation machinery (issue #6)
+ *   will act on this; in v0.1 it is only reported via headers and log.
+ * - `skipped`: orchestrator was not able to run (e.g. streaming response
+ *   per ADR-0013). Pipeline forwards unchanged and logs the skip.
+ *
+ * The `signals`, `aggregate`, and `verdict` fields let the transparency
+ * layer (ADR-0007) and the audit log render a rich report without
+ * re-running anything.
+ */
+export type OrchestratorDecision =
+  | {
+      readonly kind: 'pass';
+      readonly signals: readonly Signal[];
+      readonly aggregate: number;
+      readonly verdict?: LlmVerdict;
+    }
+  | {
+      readonly kind: 'escalate';
+      readonly reason: 'hard_signals' | 'llm_verdict';
+      readonly signals: readonly Signal[];
+      readonly aggregate: number;
+      readonly verdict?: LlmVerdict;
+    }
+  | {
+      readonly kind: 'skipped';
+      readonly reason: 'streaming' | 'non_ok_status' | 'non_json_content_type';
+      readonly detail?: string;
+    };
+
+/** Signature of the orchestrator callable. */
+export type Orchestrator = (
+  input: OrchestratorInput,
+  config: OrchestratorConfig,
+) => Promise<OrchestratorDecision>;

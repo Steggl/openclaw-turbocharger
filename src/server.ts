@@ -1,9 +1,11 @@
 // OpenAI-compatible HTTP server entry.
 //
-// Issue #2 scope: a minimal Hono app exposing POST /v1/chat/completions that
-// pass-through-forwards to a configured downstream target (see proxy.ts) and
-// emits one structured log line per request. Critic / escalation /
-// transparency hooks land in later issues.
+// Issue #2 introduced the pass-through proxy. Issue #5 adds an optional
+// orchestrator pipeline in front of the proxy: when `pipelineConfig` is
+// present in {@link AppDeps}, the request flows through
+// {@link runPipeline} instead of directly through
+// {@link forwardChatCompletion}, and the resulting decision is surfaced
+// in response headers and in the per-request log line.
 
 import { fileURLToPath } from 'node:url';
 
@@ -11,13 +13,38 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 
 import { loadEnvConfig } from './config/env.js';
+import { runPipeline } from './pipeline.js';
 import { forwardChatCompletion } from './proxy.js';
-import type { AppConfig, ProxyTarget, RequestLogger } from './types.js';
+import type {
+  AppConfig,
+  OrchestratorConfig,
+  OrchestratorDecision,
+  ProxyTarget,
+  RequestLogEntry,
+  RequestLogger,
+} from './types.js';
 
 export interface AppDeps {
   readonly proxyTarget: ProxyTarget;
   /** Optional logger override; defaults to one JSON object per line on stderr. */
   readonly logger?: RequestLogger;
+  /**
+   * Optional orchestrator configuration. When present, the server runs
+   * the full {@link runPipeline} (proxy + orchestrator) and adds
+   * X-Turbocharger-* response headers and a decision field to the log
+   * line. When absent, the server falls back to the pass-through proxy
+   * behaviour from issue #2.
+   */
+  readonly orchestratorConfig?: OrchestratorConfig;
+}
+
+/**
+ * Per-request log entry with an optional orchestrator decision field.
+ * Extends {@link RequestLogEntry} without modifying its narrow shape.
+ */
+export interface DecisionLogEntry extends RequestLogEntry {
+  readonly decision?: OrchestratorDecision['kind'];
+  readonly decision_reason?: string;
 }
 
 const defaultLogger: RequestLogger = (entry) => {
@@ -36,7 +63,18 @@ export function createApp(deps: AppDeps): Hono {
   app.post('/v1/chat/completions', async (c) => {
     const start = Date.now();
     let status = 0;
+    let decisionKind: OrchestratorDecision['kind'] | undefined;
+    let decisionReason: string | undefined;
     try {
+      if (deps.orchestratorConfig !== undefined) {
+        const result = await runPipeline(c.req.raw, deps.proxyTarget, deps.orchestratorConfig);
+        status = result.response.status;
+        decisionKind = result.decision.kind;
+        if (result.decision.kind === 'escalate' || result.decision.kind === 'skipped') {
+          decisionReason = result.decision.reason;
+        }
+        return result.response;
+      }
       const downstream = await forwardChatCompletion(c.req.raw, deps.proxyTarget);
       status = downstream.status;
       return downstream;
@@ -59,13 +97,16 @@ export function createApp(deps: AppDeps): Hono {
         502,
       );
     } finally {
-      log({
+      const entry: DecisionLogEntry = {
         ts: new Date().toISOString(),
         method: c.req.method,
         path: new URL(c.req.url).pathname,
         status,
         latency_ms: Date.now() - start,
-      });
+        ...(decisionKind !== undefined ? { decision: decisionKind } : {}),
+        ...(decisionReason !== undefined ? { decision_reason: decisionReason } : {}),
+      };
+      log(entry);
     }
   });
 
@@ -83,12 +124,21 @@ export interface RunningServer {
  * Start the sidecar HTTP server on the configured port. Returns a handle
  * with a `close()` for graceful shutdown.
  */
-export function startServer(config: AppConfig = loadEnvConfig()): RunningServer {
+export function startServer(
+  config: AppConfig = loadEnvConfig(),
+  deps?: Omit<AppDeps, 'proxyTarget'>,
+): RunningServer {
   const proxyTarget: ProxyTarget = {
     baseUrl: config.downstreamBaseUrl,
     ...(config.downstreamApiKey !== undefined ? { apiKey: config.downstreamApiKey } : {}),
   };
-  const app = createApp({ proxyTarget });
+  const app = createApp({
+    proxyTarget,
+    ...(deps?.logger !== undefined ? { logger: deps.logger } : {}),
+    ...(deps?.orchestratorConfig !== undefined
+      ? { orchestratorConfig: deps.orchestratorConfig }
+      : {}),
+  });
 
   const server = serve({
     fetch: app.fetch,

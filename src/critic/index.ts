@@ -1,14 +1,13 @@
 // Critic module barrel.
 //
-// Issue #3 exposed the hard-signal detection surface. Issue #4 adds the
-// LLM-critic. The noisy-OR aggregator for hard signals, the escalation
-// threshold comparison, and the trigger-gating that decides when the
-// LLM-critic runs all land in issue #5 (orchestrator) alongside ADRs
-// 0006, 0010, and 0011.
+// Issue #3 exposed the hard-signal detection surface. Issue #4 added the
+// LLM-critic. Issue #5 adds the orchestrator that combines them into a
+// single decision via noisy-OR aggregation and grey-band gating.
 //
-// Until then, callers importing from this module get the detection
-// primitives (hard-signal detectors, the collector) and the LLM-critic
-// callable. Gluing them into a single verdict is not committed to yet.
+// Callers importing from this module get the detection primitives,
+// the LLM-critic callable, and the orchestrator. The pipeline that
+// wires the orchestrator in front of the proxy is in
+// {@link ../pipeline.ts}.
 
 export {
   collectHardSignals,
@@ -22,3 +21,5 @@ export {
 } from './hard-signals.js';
 
 export { runLlmCritic } from './llm-critic.js';
+
+export { aggregateSignals, runOrchestrator } from './orchestrator.js';
