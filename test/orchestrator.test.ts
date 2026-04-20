@@ -39,10 +39,13 @@ function signal(category: SignalCategory, confidence: number, reason = 'test'): 
   return { category, confidence, reason };
 }
 
-/** Build a minimal LLM-critic stub returning a fixed result. */
-function stubCritic(
-  result: Awaited<ReturnType<LlmCritic>>,
-): OrchestratorConfig['llmCritic'] {
+/** Build a minimal LLM-critic stub returning a fixed result. Returns a
+ * concrete (non-undefined) object so it can always be spread into an
+ * OrchestratorConfig under exactOptionalPropertyTypes. */
+function stubCritic(result: Awaited<ReturnType<LlmCritic>>): {
+  readonly run: LlmCritic;
+  readonly config: LlmCriticConfig;
+} {
   const run: LlmCritic = vi.fn(async () => result) as unknown as LlmCritic;
   const config: LlmCriticConfig = {
     baseUrl: 'http://critic.test/v1',
@@ -167,7 +170,7 @@ describe('runOrchestrator', () => {
       makeConfig({ llmCritic: critic }),
     );
     expect(decision.kind).toBe('pass');
-    expect(critic!.run).not.toHaveBeenCalled();
+    expect(critic.run).not.toHaveBeenCalled();
   });
 
   it('escalates on hard-signal evidence without invoking the critic', async () => {
@@ -189,7 +192,7 @@ describe('runOrchestrator', () => {
       expect(decision.reason).toBe('hard_signals');
       expect(decision.signals.some((s) => s.category === 'refusal')).toBe(true);
     }
-    expect(critic!.run).not.toHaveBeenCalled();
+    expect(critic.run).not.toHaveBeenCalled();
   });
 
   it('invokes the critic when the aggregate lands in the grey band', async () => {
@@ -206,7 +209,7 @@ describe('runOrchestrator', () => {
       },
       makeConfig({ llmCritic: critic }),
     );
-    expect(critic!.run).toHaveBeenCalledTimes(1);
+    expect(critic.run).toHaveBeenCalledTimes(1);
     expect(decision.kind).toBe('escalate');
     if (decision.kind === 'escalate') {
       expect(decision.reason).toBe('llm_verdict');
@@ -290,7 +293,7 @@ describe('runOrchestrator', () => {
       },
       makeConfig({ llmCritic: critic }),
     );
-    expect(critic!.run).not.toHaveBeenCalled();
+    expect(critic.run).not.toHaveBeenCalled();
   });
 
   it('forwards finishReason and locale to the hard-signal detectors', async () => {
