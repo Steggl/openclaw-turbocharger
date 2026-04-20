@@ -319,3 +319,58 @@ Revisions add a new entry that supersedes the old one rather than rewriting hist
   `transparency:audit-log`. Audit retention enforcement
   (automatic cleanup after N days) is deferred to post-MVP; v0.1 ships
   with manual cleanup guidance in the docs.
+
+## ADR-0008: Syntax-error detection scope limited to JSON for v0.1
+
+- **Date:** 2026-04-20
+- **Status:** accepted
+- **Decision:** The `syntax_error` hard-signal detector (one of the
+  six categories introduced for ADR-0006) checks only JSON code fences
+  in v0.1. Blocks explicitly tagged `json` that fail `JSON.parse` emit
+  a signal at confidence `0.85`; blocks that parse cleanly, and fences
+  tagged with any other language (or with no tag at all), emit
+  nothing. Multi-language syntax validation (JavaScript/TypeScript,
+  Python, shell, SQL, etc.) is deferred to a post-MVP follow-up issue,
+  `critic:code-syntax`.
+- **Rationale:** `PROJECT_BRIEF.md` §4 calls out "syntax errors in
+  code outputs" as a hard-signal category, but does not scope _which_
+  languages. A useful multi-language check requires either a real
+  compiler/interpreter per language (pulls in heavy runtime
+  dependencies, often with native bindings, which violates the
+  runtime-dep budget in brief §8) or a tolerant parser that is likely
+  to over-fire on valid code it happens not to recognize. Neither fits
+  the "minimal magic, minimal deps" stance in the brief, and
+  over-firing specifically undermines ADR-0006 — the noisy-OR
+  aggregator depends on each detector having a low false-positive rate
+  at its declared confidence, because false fires from one detector
+  can pull the aggregate across the threshold on their own. JSON sits
+  at the opposite end of that trade: `JSON.parse` is in the runtime
+  already, is deterministic, and has a near-zero false-positive rate
+  when the fence is explicitly tagged `json`. In real-world LLM
+  traffic, structured JSON outputs (tool calls, form responses, config
+  blocks) are frequent, and a parse failure there is a clean
+  inadequacy signal.
+- **Alternatives considered:**
+  - _Full JavaScript/TypeScript validation via the `typescript`
+    package._ Rejected for v0.1. The TypeScript compiler is tolerant
+    by design — it parses many constructs that fail at runtime and
+    mis-reports many that succeed. Distinguishing true syntax errors
+    from resolution errors (e.g. `TS2307 "cannot find module"`) adds
+    significant maintenance surface. Worth doing as its own
+    `critic:code-syntax` issue with a dedicated config key; not worth
+    squeezing into #3.
+  - _Drop the `syntax_error` category from v0.1 entirely._ Rejected:
+    JSON parse-checks deliver genuine value for structured LLM output
+    at roughly fifteen lines of code and zero extra dependencies.
+    Losing that would be strictly worse for the same cost.
+  - _Multi-language via abstract-syntax-tree libraries (e.g.
+    `tree-sitter`)._ Rejected for v0.1. `tree-sitter` pulls in native
+    grammar bindings per language, which violates both the runtime-dep
+    budget and the implicit zero-native-dep preference in the brief.
+- **Related:** issue #3 (`critic:hard-signals`), in which the detector
+  lands. Post-MVP follow-up `critic:code-syntax` tracks full
+  multi-language coverage. The detector's `category` is kept as the
+  broader `syntax_error` (not `json_syntax_error`) so that the
+  transparency layer (ADR-0007) and the audit log need no changes
+  when the multi-language version lands; new languages extend the
+  detector, not the type surface.
