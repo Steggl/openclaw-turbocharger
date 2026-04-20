@@ -2,7 +2,7 @@
 // truth so that proxy / critic / escalation / transparency stay structurally
 // consistent. Issue #2 introduces the minimal surface needed for the
 // pass-through proxy; issue #3 adds the hard-signal detection surface;
-// later issues extend further.
+// issue #4 adds the LLM-critic surface; later issues extend further.
 
 /**
  * Effective configuration for a running sidecar process.
@@ -111,3 +111,105 @@ export interface DetectorInput {
 
 /** Signature every hard-signal detector must satisfy. */
 export type HardSignalDetector = (input: DetectorInput) => Signal | null;
+
+// ---------------------------------------------------------------------------
+// Critic — LLM-critic (issue #4)
+// ---------------------------------------------------------------------------
+
+/**
+ * A verdict delivered by the LLM-critic. Per ADR-0011 this is NOT mixed
+ * into the hard-signal noisy-OR pool; the orchestrator (issue #5) compares
+ * it against the escalation threshold as an independent piece of evidence.
+ *
+ * The `verdict` field is the coarse yes/no answer, and `confidence`
+ * expresses how certain the critic is. Escalation fires when
+ * `verdict === 'fail' && confidence >= threshold`; `pass` verdicts never
+ * escalate regardless of their confidence.
+ */
+export interface LlmVerdict {
+  readonly verdict: 'pass' | 'fail';
+  /** Continuous confidence in `[0, 1]`. */
+  readonly confidence: number;
+  /** Short reason produced by the critic, suitable for the transparency layer. */
+  readonly reason: string;
+}
+
+/**
+ * Input passed to the LLM-critic. Matches {@link DetectorInput} in shape
+ * for the fields the critic needs, but does not include `finishReason` —
+ * that is hard-signal territory and has no role in the critic's judgement.
+ */
+export interface LlmCriticInput {
+  readonly response: string;
+  readonly userPrompt: string;
+  /** BCP-47 locale hint; selects the prompt template. Defaults to `"en"`. */
+  readonly locale?: string;
+}
+
+/**
+ * Token pricing for a critic model, used by the pre-call budget check.
+ * When not supplied, the budget check is skipped and the critic runs
+ * regardless of the configured budget. Per ADR-0012, v0.1 has no defaults
+ * here — the caller must opt in to budget enforcement.
+ */
+export interface ModelPricing {
+  /** USD cost per 1,000,000 input tokens. */
+  readonly inputUsdPerMillion: number;
+  /** USD cost per 1,000,000 output tokens. */
+  readonly outputUsdPerMillion: number;
+}
+
+/**
+ * Configuration bundle for a single LLM-critic invocation. Per ADR-0012,
+ * there are no silent defaults for `baseUrl` or `model`; callers must
+ * supply them explicitly. Budget enforcement is optional and requires
+ * both `budgetUsd` and `pricing` to be set.
+ */
+export interface LlmCriticConfig {
+  /** OpenAI-compatible base URL, e.g. `http://localhost:11434/v1`. */
+  readonly baseUrl: string;
+  /** Model slug as understood by the downstream endpoint. */
+  readonly model: string;
+  /** Optional bearer token for the critic endpoint. */
+  readonly apiKey?: string;
+  /** Per-request timeout in milliseconds. Defaults to 30_000. */
+  readonly timeoutMs?: number;
+  /** Per-request USD ceiling. Only enforced when `pricing` is also set. */
+  readonly budgetUsd?: number;
+  /** Pricing for cost estimation. When absent, budget is not enforced. */
+  readonly pricing?: ModelPricing;
+  /**
+   * Optional `fetch` implementation for testing. Defaults to the global
+   * `fetch` in Node 22. Exposed here so tests can inject mocks without
+   * polluting the global scope.
+   */
+  readonly fetchImpl?: typeof fetch;
+}
+
+/**
+ * Discriminated result of an LLM-critic invocation. The three kinds are:
+ *
+ * - `verdict`: the critic returned a usable verdict.
+ * - `skipped`: the critic did not run (budget exceeded, or explicitly
+ *   disabled by the caller).
+ * - `error`: the critic ran but produced no usable verdict (network
+ *   failure, HTTP error, parse failure, timeout, empty response).
+ *
+ * Per the brief's "no silent fallbacks that hide failures" principle,
+ * the orchestrator (issue #5) never converts `error` or `skipped` into
+ * an implicit `pass`. Callers decide case by case.
+ */
+export type LlmCriticResult =
+  | { readonly kind: 'verdict'; readonly verdict: LlmVerdict }
+  | { readonly kind: 'skipped'; readonly reason: 'over_budget' | 'disabled' }
+  | {
+      readonly kind: 'error';
+      readonly reason: 'timeout' | 'network' | 'http' | 'empty' | 'parse_failure';
+      readonly detail: string;
+    };
+
+/** Signature of the LLM-critic callable. */
+export type LlmCritic = (
+  input: LlmCriticInput,
+  config: LlmCriticConfig,
+) => Promise<LlmCriticResult>;
