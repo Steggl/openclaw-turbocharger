@@ -602,7 +602,7 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
   `test/proxy.test.ts` streaming assertion; (b) duplicating the
   stream with `.tee()` so one half streams to the client and the
   other accumulates for the orchestrator — which means the decision
-  is only available *after* the stream has finished, long past the
+  is only available _after_ the stream has finished, long past the
   HTTP headers, requiring trailers (poorly supported across clients)
   or body-level SSE events (which contradicts the "no body
   modification" posture we chose for v0.1, ADR-0007's in-stream
@@ -664,7 +664,7 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
     kept-config ergonomic win is small when the caller is a single
     pipeline that already holds the config anyway.
   - _Closure-based factory: `createOrchestrator(config) =>
-    (input) => Decision`._ Rejected: hides the config dependency
+(input) => Decision`._ Rejected: hides the config dependency
     from stack traces and test-setup, for the same closure-bound
     ergonomic as the class form with none of the class's
     discoverability.
