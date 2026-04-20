@@ -71,7 +71,8 @@ describe('refusalDetector', () => {
   it('flags soft hedging at low confidence', () => {
     const signal = refusalDetector(
       makeInput({
-        response: 'I would advise caution when interpreting these numbers because the data has gaps.',
+        response:
+          'I would advise caution when interpreting these numbers because the data has gaps.',
       }),
     );
     expect(signal).not.toBeNull();
@@ -355,7 +356,7 @@ describe('collectHardSignals', () => {
     // Refusal fires at index 0 in HARD_SIGNAL_DETECTORS; syntax_error fires at
     // index 5. If both are present, refusal must appear first in the result.
     const input = makeInput({
-      response: "I cannot help with that.\n```json\n{broken}\n```",
+      response: 'I cannot help with that.\n```json\n{broken}\n```',
       userPrompt:
         'Please explain how to implement a JSON parser in Python and include an example payload.',
     });

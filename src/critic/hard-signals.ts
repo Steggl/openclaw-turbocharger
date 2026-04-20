@@ -53,11 +53,13 @@ const REFUSAL_PATTERNS: Readonly<Record<string, readonly RefusalPattern[]>> = {
   ],
   de: [
     {
-      pattern: /\b(?:ich\s+kann\s+(?:dir|Ihnen|dabei)\s+nicht\s+helfen|ich\s+bin\s+nicht\s+in\s+der\s+Lage)\b/i,
+      pattern:
+        /\b(?:ich\s+kann\s+(?:dir|Ihnen|dabei)\s+nicht\s+helfen|ich\s+bin\s+nicht\s+in\s+der\s+Lage)\b/i,
       confidence: 0.95,
     },
     {
-      pattern: /\b(?:leider|entschuldigung)[,.]\s*(?:aber\s+)?(?:ich\s+kann|das\s+kann\s+ich\s+nicht)\b/i,
+      pattern:
+        /\b(?:leider|entschuldigung)[,.]\s*(?:aber\s+)?(?:ich\s+kann|das\s+kann\s+ich\s+nicht)\b/i,
       confidence: 0.95,
     },
     { pattern: /\bAls\s+(?:KI|K\.I\.|ein\s+KI-(?:Assistent|Modell))[,.]/i, confidence: 0.7 },
