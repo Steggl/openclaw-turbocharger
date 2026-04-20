@@ -1,15 +1,14 @@
 // Critic module barrel.
 //
-// Issue #3 scope: re-exports the hard-signal detection surface
-// (see {@link ./hard-signals.ts}). The noisy-OR aggregator, weight
-// application, and verdict/threshold decision live in a future file
-// in this directory, added when issue #5 lands.
+// Issue #3 exposed the hard-signal detection surface. Issue #4 adds the
+// LLM-critic. The noisy-OR aggregator for hard signals, the escalation
+// threshold comparison, and the trigger-gating that decides when the
+// LLM-critic runs all land in issue #5 (orchestrator) alongside ADRs
+// 0006, 0010, and 0011.
 //
-// Until then, callers get only the detection primitives. The
-// orchestrator's interface (cascade strategy, threshold comparison,
-// LLM-critic gating, cost ceiling) is deliberately not committed yet,
-// because its exact shape is driven by ADR-0006 (aggregation) and
-// the config schema from issue #11.
+// Until then, callers importing from this module get the detection
+// primitives (hard-signal detectors, the collector) and the LLM-critic
+// callable. Gluing them into a single verdict is not committed to yet.
 
 export {
   collectHardSignals,
@@ -21,3 +20,5 @@ export {
   toolErrorDetector,
   truncationDetector,
 } from './hard-signals.js';
+
+export { runLlmCritic } from './llm-critic.js';
