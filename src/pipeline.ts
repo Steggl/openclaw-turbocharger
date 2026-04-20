@@ -26,11 +26,7 @@
 
 import { forwardChatCompletion } from './proxy.js';
 import { runOrchestrator } from './critic/orchestrator.js';
-import type {
-  OrchestratorConfig,
-  OrchestratorDecision,
-  ProxyTarget,
-} from './types.js';
+import type { OrchestratorConfig, OrchestratorDecision, ProxyTarget } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Request inspection
@@ -169,17 +165,11 @@ function annotateResponse(response: Response, decision: OrchestratorDecision): R
       headers.set('x-turbocharger-decision', 'pass');
       headers.set('x-turbocharger-aggregate', decision.aggregate.toFixed(3));
       if (decision.signals.length > 0) {
-        headers.set(
-          'x-turbocharger-signals',
-          decision.signals.map((s) => s.category).join(','),
-        );
+        headers.set('x-turbocharger-signals', decision.signals.map((s) => s.category).join(','));
       }
       if (decision.verdict !== undefined) {
         headers.set('x-turbocharger-verdict', decision.verdict.verdict);
-        headers.set(
-          'x-turbocharger-verdict-confidence',
-          decision.verdict.confidence.toFixed(3),
-        );
+        headers.set('x-turbocharger-verdict-confidence', decision.verdict.confidence.toFixed(3));
       }
       break;
     }
@@ -188,17 +178,11 @@ function annotateResponse(response: Response, decision: OrchestratorDecision): R
       headers.set('x-turbocharger-reason', decision.reason);
       headers.set('x-turbocharger-aggregate', decision.aggregate.toFixed(3));
       if (decision.signals.length > 0) {
-        headers.set(
-          'x-turbocharger-signals',
-          decision.signals.map((s) => s.category).join(','),
-        );
+        headers.set('x-turbocharger-signals', decision.signals.map((s) => s.category).join(','));
       }
       if (decision.verdict !== undefined) {
         headers.set('x-turbocharger-verdict', decision.verdict.verdict);
-        headers.set(
-          'x-turbocharger-verdict-confidence',
-          decision.verdict.confidence.toFixed(3),
-        );
+        headers.set('x-turbocharger-verdict-confidence', decision.verdict.confidence.toFixed(3));
       }
       break;
     }

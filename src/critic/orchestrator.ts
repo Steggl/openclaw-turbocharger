@@ -48,10 +48,7 @@ function clamp01(x: number): number {
  * Returns a value in [0, 1]. Signals whose weight is 0 contribute
  * nothing (their category is effectively disabled).
  */
-export function aggregateSignals(
-  signals: readonly Signal[],
-  weights: SignalWeights,
-): number {
+export function aggregateSignals(signals: readonly Signal[], weights: SignalWeights): number {
   let product = 1;
   for (const signal of signals) {
     const w = clamp01(weights[signal.category]);
@@ -72,10 +69,7 @@ export function aggregateSignals(
  * either redundant (aggregate already escalates) or wasteful
  * (aggregate is confidently below threshold).
  */
-function aggregateInGreyBand(
-  aggregate: number,
-  greyBand: readonly [number, number],
-): boolean {
+function aggregateInGreyBand(aggregate: number, greyBand: readonly [number, number]): boolean {
   const lower = greyBand[0];
   const upper = greyBand[1];
   return aggregate >= lower && aggregate < upper;
