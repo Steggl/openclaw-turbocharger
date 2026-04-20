@@ -264,7 +264,7 @@ describe('runLlmCritic', () => {
   });
 
   it('sends the German prompt template when locale=de', async () => {
-    const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchImpl = vi.fn(async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
       // Shape: { messages: [{role:'system',content:...}, {role:'user',content:...}] }
       const systemContent = body.messages[0].content as string;
@@ -282,7 +282,7 @@ describe('runLlmCritic', () => {
   });
 
   it('sends an Authorization header when apiKey is configured', async () => {
-    const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchImpl = vi.fn(async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const headers = init?.headers as Record<string, string>;
       expect(headers['authorization']).toBe('Bearer secret-token');
       return new Response(
