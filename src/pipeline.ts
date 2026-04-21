@@ -319,7 +319,19 @@ export async function runPipeline(
 
   const path: string[] = [];
   let depth = 0;
-  let stoppedReason: EscalationTrace['stoppedReason'] = 'passed';
+  // Default stoppedReason is 'not_attempted', which is correct for
+  // every case where the escalation loop does not run at all: no
+  // escalation config, non-ladder mode, maxDepth === 0, or the very
+  // first orchestrator decision was escalate but the loop condition
+  // still prevents re-query. The up-front 'pass' check below promotes
+  // it to 'passed' when the first response was already adequate; every
+  // branch inside the loop that stops early explicitly sets its own
+  // final value.
+  let stoppedReason: EscalationTrace['stoppedReason'] = 'not_attempted';
+
+  if (currentDecision.kind === 'pass') {
+    stoppedReason = 'passed';
+  }
 
   // Escalation loop. Runs only when:
   //   - the orchestrator decided `escalate`,
@@ -388,16 +400,6 @@ export async function runPipeline(
       stoppedReason = 'max_depth_reached';
       break;
     }
-  }
-
-  // If no escalation happened at all, the stoppedReason is either
-  // 'passed' (first response was adequate) or 'not_attempted' (no
-  // escalation config, or decision wasn't escalate, or mode isn't
-  // ladder).
-  if (path.length === 0 && currentDecision.kind === 'pass') {
-    stoppedReason = 'passed';
-  } else if (path.length === 0 && currentDecision.kind === 'escalate') {
-    stoppedReason = 'not_attempted';
   }
 
   const trace: EscalationTrace = { path, stoppedReason, depth };
