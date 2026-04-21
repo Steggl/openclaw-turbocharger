@@ -1,32 +1,45 @@
-// Pipeline: forwards a chat/completions request via the proxy, then runs
-// the orchestrator against the response body to produce an
-// {@link OrchestratorDecision}. Returns the (possibly annotated)
-// response and the decision; the caller (server.ts) emits headers and
-// the log line.
+// Pipeline: forwards a chat/completions request via the proxy, runs the
+// orchestrator against the response body to produce an
+// {@link OrchestratorDecision}, and — when an escalation strategy is
+// configured (issue #6) — re-queries with the next model on the ladder
+// until either the response passes, the ladder is exhausted, or the
+// configured `maxDepth` is reached. Returns the (possibly annotated)
+// final response plus a trace of what happened; the caller (server.ts)
+// emits headers and the log line.
 //
-// Scope (v0.1, issue #5):
+// Scope (v0.1, issue #6):
 //   - Non-streamed `application/json` responses with 2xx status are
 //     evaluated. The body is buffered, the orchestrator runs against
-//     the assembled content, and the decision is surfaced via
-//     X-Turbocharger-* headers on the response that is returned to the
-//     client. Body bytes are unchanged.
+//     the assembled content, and — on an `escalate` decision — the
+//     pipeline re-sends the same request body with the next ladder
+//     model's id substituted into `model:`. Successive responses are
+//     re-evaluated by the orchestrator until a stopping condition is
+//     met (see EscalationTrace.stoppedReason).
 //   - Streamed responses (`stream: true` or `text/event-stream`) are
-//     skipped per ADR-0013. The orchestrator returns
-//     { kind: 'skipped', reason: 'streaming' }; the response is
-//     forwarded unchanged and no decision headers are added.
-//   - Non-2xx responses are skipped (the downstream already signalled
-//     failure; the critic has no role), as are non-JSON bodies.
+//     skipped per ADR-0013. No orchestrator, no escalation.
+//   - Non-2xx responses and non-JSON bodies short-circuit the
+//     orchestrator and escalation alike.
 //
 // Intentionally NOT in this file:
-//   - The actual escalation machinery. Issue #5 only decides; issue #6
-//     (ladder/max) acts on the decision.
-//   - Config loading. The pipeline takes an OrchestratorConfig as
-//     input; how that config is built (env, YAML, Zod schema) is
-//     issue #11.
+//   - Body-level transparency (banner / card in response content) —
+//     issue #9. This file surfaces decisions via headers only.
+//   - The discarded original responses are not retained or surfaced to
+//     the client, per ADR-0017. Only the final attempted response
+//     reaches the client body.
+//   - Max-mode and chorus-mode escalation — the dispatch here treats
+//     `mode !== 'ladder'` as "no escalation" so that issues #7 and #8
+//     can plug in without reshaping this file.
 
-import { forwardChatCompletion } from './proxy.js';
 import { runOrchestrator } from './critic/orchestrator.js';
-import type { OrchestratorConfig, OrchestratorDecision, ProxyTarget } from './types.js';
+import { nextLadderStep } from './escalation/ladder.js';
+import { forwardChatCompletion } from './proxy.js';
+import type {
+  EscalationConfig,
+  EscalationTrace,
+  OrchestratorConfig,
+  OrchestratorDecision,
+  ProxyTarget,
+} from './types.js';
 
 // ---------------------------------------------------------------------------
 // Request inspection
@@ -35,34 +48,34 @@ import type { OrchestratorConfig, OrchestratorDecision, ProxyTarget } from './ty
 interface ParsedRequest {
   readonly stream: boolean;
   readonly userPrompt: string;
+  readonly model: string;
   readonly locale?: string;
+  /** Parsed JSON body, or `null` if parsing failed. */
+  readonly body: Record<string, unknown> | null;
 }
 
-/**
- * Inspect the client's chat/completions request body to decide whether
- * streaming was requested, extract the last user message for the
- * orchestrator, and pick up an optional locale hint.
- *
- * The original Request is not consumed: the caller owns the original,
- * we clone for inspection so that {@link forwardChatCompletion} can
- * still read the body bytes.
- */
 async function parseClientRequest(request: Request): Promise<ParsedRequest> {
   let parsed: unknown = null;
   try {
     parsed = await request.clone().json();
   } catch {
-    // Not JSON, or malformed. Proceed with safe defaults; the downstream
-    // will return an HTTP error and the orchestrator will skip it.
+    // Not JSON, or malformed. Downstream will error; orchestrator will skip.
   }
 
   const stream = readBoolean(parsed, 'stream');
   const userPrompt = extractUserPrompt(parsed);
+  const model = readString(parsed, 'model') ?? '';
   const locale = readString(parsed, 'locale') ?? readHeaderLocale(request);
+  const body =
+    parsed !== null && typeof parsed === 'object'
+      ? (parsed as Record<string, unknown>)
+      : null;
 
   return {
     stream,
     userPrompt,
+    model,
+    body,
     ...(locale !== undefined ? { locale } : {}),
   };
 }
@@ -82,7 +95,6 @@ function readString(obj: unknown, key: string): string | undefined {
 function readHeaderLocale(request: Request): string | undefined {
   const hdr = request.headers.get('accept-language');
   if (hdr === null || hdr.length === 0) return undefined;
-  // Simplest possible parse: take the first tag, strip any q-factor.
   const first = hdr.split(',')[0];
   if (first === undefined) return undefined;
   const tag = first.split(';')[0]?.trim();
@@ -93,7 +105,6 @@ function extractUserPrompt(parsed: unknown): string {
   if (typeof parsed !== 'object' || parsed === null) return '';
   const messages = (parsed as Record<string, unknown>)['messages'];
   if (!Array.isArray(messages)) return '';
-  // Walk from the end, find the last message with role === 'user'.
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (typeof msg !== 'object' || msg === null) continue;
@@ -101,7 +112,6 @@ function extractUserPrompt(parsed: unknown): string {
     if (role !== 'user') continue;
     const content = (msg as Record<string, unknown>)['content'];
     if (typeof content === 'string') return content;
-    // OpenAI supports array-of-parts content; extract text parts only.
     if (Array.isArray(content)) {
       const parts: string[] = [];
       for (const part of content) {
@@ -126,10 +136,6 @@ interface ParsedResponse {
   readonly finishReason?: string;
 }
 
-/** Extract the assistant content and finish_reason from a non-streamed
- * chat/completions JSON body. Returns empty strings for anything
- * unexpected — the orchestrator's empty/short detector catches those
- * naturally. */
 function parseChatCompletionBody(json: unknown): ParsedResponse {
   if (typeof json !== 'object' || json === null) return { content: '' };
   const choices = (json as Record<string, unknown>)['choices'];
@@ -150,14 +156,41 @@ function parseChatCompletionBody(json: unknown): ParsedResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Escalation helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a Request object for a single escalation attempt: clone the
+ * original request body, substitute the `model` field, and send it to
+ * the same downstream. The resulting Request is passed to
+ * {@link forwardChatCompletion} exactly like the original would be.
+ *
+ * All headers are preserved from the original Request so that
+ * Authorization, Content-Type, and any client-supplied `X-*` headers
+ * stay consistent across escalation steps.
+ */
+function buildEscalationRequest(
+  original: Request,
+  body: Record<string, unknown>,
+  newModel: string,
+): Request {
+  const newBody = { ...body, model: newModel };
+  return new Request(original.url, {
+    method: original.method,
+    headers: original.headers,
+    body: JSON.stringify(newBody),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Header annotation
 // ---------------------------------------------------------------------------
 
-/** Attach X-Turbocharger-* headers describing the decision. Header
- * values never contain newlines or control characters. The reason
- * strings from individual signals are condensed to a comma-separated
- * category list to keep header sizes modest. */
-function annotateResponse(response: Response, decision: OrchestratorDecision): Response {
+function annotateResponse(
+  response: Response,
+  decision: OrchestratorDecision,
+  trace: EscalationTrace,
+): Response {
   const headers = new Headers(response.headers);
 
   switch (decision.kind) {
@@ -193,6 +226,15 @@ function annotateResponse(response: Response, decision: OrchestratorDecision): R
     }
   }
 
+  // Escalation trace is always emitted when a trace exists (even
+  // "not_attempted" for pass-first-try responses — makes client-side
+  // log parsing uniform).
+  headers.set('x-turbocharger-escalation-depth', String(trace.depth));
+  headers.set('x-turbocharger-escalation-stopped', trace.stoppedReason);
+  if (trace.path.length > 0) {
+    headers.set('x-turbocharger-escalation-path', trace.path.join(','));
+  }
+
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -207,91 +249,189 @@ function annotateResponse(response: Response, decision: OrchestratorDecision): R
 export interface PipelineResult {
   readonly response: Response;
   readonly decision: OrchestratorDecision;
+  readonly trace: EscalationTrace;
 }
 
 /**
- * Run the full pipeline: forward the request, then run the orchestrator
- * against the response if it is evaluable (non-streamed JSON, 2xx).
- * Returns the (possibly annotated) response and the decision.
- *
- * Streams and error responses skip the orchestrator by design:
- * - Streaming responses (ADR-0013) are not inspected in v0.1.
- * - Non-2xx responses are passed through with no critic involvement.
+ * Run the full pipeline: forward the request, run the orchestrator on
+ * the response, and — when configured — escalate up a ladder of models
+ * until the response passes or a stopping condition is reached.
  */
 export async function runPipeline(
   request: Request,
   target: ProxyTarget,
   orchestratorConfig: OrchestratorConfig,
+  escalationConfig?: EscalationConfig,
 ): Promise<PipelineResult> {
   const parsed = await parseClientRequest(request);
-  const downstream = await forwardChatCompletion(request, target);
 
-  // Short-circuit paths that bypass the orchestrator entirely. The
-  // response body is already a ReadableStream in these cases; we must
-  // not consume it, or the client will see an empty body.
+  // Short-circuit paths that bypass the orchestrator entirely.
   if (parsed.stream) {
     const decision: OrchestratorDecision = { kind: 'skipped', reason: 'streaming' };
-    return { response: annotateResponse(downstream, decision), decision };
+    const trace: EscalationTrace = {
+      path: [],
+      stoppedReason: 'not_attempted',
+      depth: 0,
+    };
+    const downstream = await forwardChatCompletion(request, target);
+    return { response: annotateResponse(downstream, decision, trace), decision, trace };
   }
-  if (!downstream.ok) {
+
+  // First attempt: forward the original request.
+  const firstResponse = await forwardChatCompletion(request, target);
+
+  if (!firstResponse.ok) {
     const decision: OrchestratorDecision = {
       kind: 'skipped',
       reason: 'non_ok_status',
-      detail: `${downstream.status} ${downstream.statusText}`,
+      detail: `${firstResponse.status} ${firstResponse.statusText}`,
     };
-    return { response: annotateResponse(downstream, decision), decision };
+    const trace: EscalationTrace = {
+      path: [],
+      stoppedReason: 'not_attempted',
+      depth: 0,
+    };
+    return { response: annotateResponse(firstResponse, decision, trace), decision, trace };
   }
 
-  const contentType = downstream.headers.get('content-type') ?? '';
+  const contentType = firstResponse.headers.get('content-type') ?? '';
   if (!contentType.toLowerCase().includes('application/json')) {
     const decision: OrchestratorDecision = {
       kind: 'skipped',
       reason: 'non_json_content_type',
       detail: contentType,
     };
-    return { response: annotateResponse(downstream, decision), decision };
-  }
-
-  // Buffer the response body. Chat-completion JSON payloads are small;
-  // the streaming case above handles the one that could be large.
-  const bodyText = await downstream.text();
-
-  let bodyJson: unknown;
-  try {
-    bodyJson = JSON.parse(bodyText);
-  } catch {
-    // Downstream claimed JSON but produced something we can't parse.
-    // Forward the body bytes unchanged and skip the orchestrator.
-    const decision: OrchestratorDecision = {
-      kind: 'skipped',
-      reason: 'non_json_content_type',
-      detail: 'JSON parse failure',
+    const trace: EscalationTrace = {
+      path: [],
+      stoppedReason: 'not_attempted',
+      depth: 0,
     };
-    const reconstituted = new Response(bodyText, {
-      status: downstream.status,
-      statusText: downstream.statusText,
-      headers: downstream.headers,
-    });
-    return { response: annotateResponse(reconstituted, decision), decision };
+    return { response: annotateResponse(firstResponse, decision, trace), decision, trace };
   }
 
-  const assistant = parseChatCompletionBody(bodyJson);
-  const decision = await runOrchestrator(
-    {
-      response: assistant.content,
-      userPrompt: parsed.userPrompt,
-      ...(assistant.finishReason !== undefined ? { finishReason: assistant.finishReason } : {}),
-      ...(parsed.locale !== undefined ? { locale: parsed.locale } : {}),
-    },
+  // First response is a JSON body we can evaluate.
+  let currentResponse = firstResponse;
+  let currentBodyText = await currentResponse.text();
+  let currentModel = parsed.model;
+  let currentAssistant = parseChatCompletionBody(safeJsonParse(currentBodyText));
+  let currentDecision: OrchestratorDecision = await runOrchestrator(
+    buildOrchestratorInput(currentAssistant, parsed),
     orchestratorConfig,
   );
 
-  // Rebuild the response with the original body text (so the client
-  // gets the exact bytes the downstream sent).
-  const reconstituted = new Response(bodyText, {
-    status: downstream.status,
-    statusText: downstream.statusText,
-    headers: downstream.headers,
+  const path: string[] = [];
+  let depth = 0;
+  let stoppedReason: EscalationTrace['stoppedReason'] = 'passed';
+
+  // Escalation loop. Runs only when:
+  //   - the orchestrator decided `escalate`,
+  //   - an escalation config is provided,
+  //   - the mode is `ladder` (other modes fall through untouched; issues #7/#8),
+  //   - `maxDepth` has not yet been spent,
+  //   - a next ladder step exists.
+  while (
+    currentDecision.kind === 'escalate' &&
+    escalationConfig !== undefined &&
+    escalationConfig.mode === 'ladder' &&
+    depth < escalationConfig.maxDepth
+  ) {
+    const next = nextLadderStep(currentModel, escalationConfig.ladder);
+    if (next === null) {
+      // Current model isn't on the ladder, or we're at the top. Stop
+      // with an informative reason so monitors can distinguish the two
+      // off-ladder cases from actual ladder exhaustion.
+      stoppedReason =
+        escalationConfig.ladder.indexOf(currentModel) === -1
+          ? 'model_not_on_ladder'
+          : 'ladder_exhausted';
+      break;
+    }
+
+    path.push(next);
+    depth += 1;
+
+    const reQueryRequest = buildEscalationRequest(request, parsed.body ?? {}, next);
+    const reQueryResponse = await forwardChatCompletion(reQueryRequest, target);
+
+    if (!reQueryResponse.ok) {
+      // The re-query itself failed at the HTTP level. Stop the loop and
+      // hand the last failing response back so the client can see what
+      // happened. The decision stays `escalate`.
+      currentResponse = reQueryResponse;
+      currentBodyText = await reQueryResponse.text();
+      stoppedReason = 'max_depth_reached';
+      break;
+    }
+
+    const reQueryContentType = reQueryResponse.headers.get('content-type') ?? '';
+    if (!reQueryContentType.toLowerCase().includes('application/json')) {
+      // Similar handling: if the re-query returns non-JSON, stop and
+      // return that body unchanged.
+      currentResponse = reQueryResponse;
+      currentBodyText = await reQueryResponse.text();
+      stoppedReason = 'max_depth_reached';
+      break;
+    }
+
+    currentResponse = reQueryResponse;
+    currentBodyText = await reQueryResponse.text();
+    currentAssistant = parseChatCompletionBody(safeJsonParse(currentBodyText));
+    currentModel = next;
+    currentDecision = await runOrchestrator(
+      buildOrchestratorInput(currentAssistant, parsed),
+      orchestratorConfig,
+    );
+
+    if (currentDecision.kind === 'pass') {
+      stoppedReason = 'passed';
+      break;
+    }
+    if (depth >= escalationConfig.maxDepth) {
+      stoppedReason = 'max_depth_reached';
+      break;
+    }
+  }
+
+  // If no escalation happened at all, the stoppedReason is either
+  // 'passed' (first response was adequate) or 'not_attempted' (no
+  // escalation config, or decision wasn't escalate, or mode isn't
+  // ladder).
+  if (path.length === 0 && currentDecision.kind === 'pass') {
+    stoppedReason = 'passed';
+  } else if (path.length === 0 && currentDecision.kind === 'escalate') {
+    stoppedReason = 'not_attempted';
+  }
+
+  const trace: EscalationTrace = { path, stoppedReason, depth };
+
+  const reconstituted = new Response(currentBodyText, {
+    status: currentResponse.status,
+    statusText: currentResponse.statusText,
+    headers: currentResponse.headers,
   });
-  return { response: annotateResponse(reconstituted, decision), decision };
+  return {
+    response: annotateResponse(reconstituted, currentDecision, trace),
+    decision: currentDecision,
+    trace,
+  };
+}
+
+function safeJsonParse(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function buildOrchestratorInput(
+  assistant: ParsedResponse,
+  parsed: ParsedRequest,
+): Parameters<typeof runOrchestrator>[0] {
+  return {
+    response: assistant.content,
+    userPrompt: parsed.userPrompt,
+    ...(assistant.finishReason !== undefined ? { finishReason: assistant.finishReason } : {}),
+    ...(parsed.locale !== undefined ? { locale: parsed.locale } : {}),
+  };
 }
