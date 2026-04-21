@@ -717,3 +717,127 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
     middleware if that simplification pays for itself.
 - **Related:** issue #5 pipeline module; issue #6 escalation will
   extend `runPipeline` to act on `escalate` decisions.
+
+## ADR-0016: Ladder is a flat list of model IDs against a single downstream
+
+- **Date:** 2026-04-21
+- **Status:** accepted
+- **Decision:** For issue #6 (`escalation:ladder`), the ladder is a
+  flat, ordered list of model IDs. Every rung is sent to the single
+  configured downstream `ProxyTarget`; per-rung `baseUrl` and
+  `apiKey` are deliberately out of scope for v0.1.
+- **Rationale:** The brief (§3 "Downstream targets") describes the
+  typical deployment as the sidecar sitting in front of *one* route
+  — a local Ollama, a hosted aggregator (OpenRouter, ClawRouter,
+  iblai-router, openmark-router), or a single provider endpoint.
+  Aggregators already expose many providers behind one base URL
+  using model-id prefixes like `anthropic/claude-sonnet-4-6` or
+  `openai/gpt-4o`, which the ladder naturally names. Making the
+  ladder a flat string list keeps the config shape trivial
+  (`ladder: [a, b, c]`), avoids a discriminated-union schema that
+  would only pay off for the minority of users who want to route
+  different rungs to different providers, and leaves a clean
+  upgrade path for a future multi-downstream variant.
+- **Alternatives considered:**
+  - _Per-rung `{model, baseUrl, apiKey}` objects._ Rejected for
+    v0.1: doubles the config schema surface, requires multi-provider
+    credential management, and the aggregators already cover the
+    intended deployments. Can be added later as a discriminated
+    union entry (string | object) without breaking existing
+    flat-list configs.
+  - _Hybrid (string or object per rung)._ Rejected for v0.1: all the
+    complexity of the per-rung variant, no simplification over the
+    flat list. If we ever add per-rung overrides, we revisit this
+    ADR and decide whether the hybrid or a separate
+    `perRungOverrides` map is the cleaner shape.
+- **Related:** issue #6. Post-MVP candidate: a per-rung override
+  feature if and when real deployments ask for it. Issue #12
+  (per-request header overrides) covers the orthogonal "force a
+  specific model for this call" case.
+
+## ADR-0017: The discarded original response is not surfaced to the client
+
+- **Date:** 2026-04-21
+- **Status:** accepted
+- **Decision:** When the pipeline escalates, the original response
+  bodies from rungs below the final one are not retained and not
+  surfaced to the client in any form — not in headers, not in the
+  response body, not as an additional field. Only the final
+  attempted response's body reaches the client. Headers record the
+  escalation path (which rungs were tried) and the stopping reason,
+  but not the discarded content.
+- **Rationale:** The escalation exists because the original answer
+  was judged inadequate. Passing it through alongside the final
+  answer forces the client to re-implement adequacy judgement just
+  to decide which version to show, which defeats the point of the
+  critic pipeline. The transparency layer (issues #9 and #10) is
+  the correct place to surface escalation metadata in the body —
+  the banner (#9) names the escalation as a short line, and the
+  card (#10) can include a structured record of the path. Keeping
+  those concerns separated keeps issue #6 focused on the re-query
+  mechanics. The brief's §6 "no weak answer forwarded to stronger
+  model" directive is honoured at a different layer (we do not
+  prime the stronger model with the weaker model's output), but the
+  same spirit — not letting the weak answer continue to influence
+  the interaction — also argues for not putting it in front of the
+  client.
+- **Alternatives considered:**
+  - _Include the original response(s) as `X-Turbocharger-Original-*`
+    headers._ Rejected: header size limits make this fragile for
+    anything but trivial responses, and most log aggregators will
+    redact or truncate non-standard header payloads.
+  - _Append the originals as extra JSON fields alongside
+    `choices`._ Rejected for v0.1: modifies the response body,
+    which the issue #5 pipeline established as off-limits outside
+    the explicit transparency modes of issues #9/#10.
+  - _Expose the originals via a separate API endpoint (`GET
+    /v1/traces/{id}`)._ Rejected for v0.1: would require request-id
+    generation and an audit-log backing store. Tracked in the
+    post-MVP backlog; see ADR-0007 on the audit-log tier.
+- **Related:** issue #6 (this ADR); issues #9 and #10 for the body-
+  level transparency surfaces where the discarded content may
+  resurface by design.
+
+## ADR-0018: Default max escalation depth is 2
+
+- **Date:** 2026-04-21
+- **Status:** accepted
+- **Decision:** The recommended default for `EscalationConfig.maxDepth`
+  is 2: the pipeline performs at most two re-queries after the
+  initial attempt, so the client sees an answer from at most the
+  third ladder step. `maxDepth: 0` disables escalation entirely
+  (decisions are still reported but no re-query runs); `maxDepth: 1`
+  allows one escalation. The type surface does not embed this
+  default — callers must supply the value explicitly — but the
+  brief (§5 "Max escalation depth: configurable, default 2") and
+  examples use 2.
+- **Rationale:** Two escalations covers the realistic useful range:
+  the weakest → mid model upgrade fixes most refusal and truncation
+  cases; the mid → strong upgrade catches genuinely hard prompts
+  that the mid model also fails. A third or fourth upgrade rarely
+  changes the outcome — if even the strong model cannot answer, the
+  bottleneck is usually the prompt (unanswerable, malformed,
+  out-of-policy) rather than the model. Capping at 2 bounds
+  worst-case latency and cost: the client-facing latency is at most
+  three downstream round-trips plus two critic passes, and the cost
+  budget is the sum of three completions plus two critic calls —
+  enough to reason about in a headroom calculation, unlike a
+  depth-5 or unlimited variant.
+- **Alternatives considered:**
+  - _Default = ladder length (walk the whole ladder until pass or
+    exhaustion)._ Rejected: the upper bound on worst-case cost
+    becomes the ladder length, which in the brief's example is 4.
+    Users who configure longer ladders for exploratory reasons
+    would pay for that exploration on every escalation.
+  - _Default 1 (one escalation only, then stop)._ Rejected:
+    insufficient for the realistic mid → strong-upgrade case.
+    Users would hit the depth ceiling on exactly the prompts they
+    care most about.
+  - _Default unbounded, cap via USD budget only._ Rejected:
+    coupling escalation depth to cost accounting makes each
+    re-query's decision path harder to reason about. A depth cap
+    is orthogonal to a cost cap; having both is fine, having one
+    replace the other is not.
+- **Related:** issue #6 (this ADR); issue #11 will introduce the
+  Zod schema that materializes the default in the validated config
+  loader.
