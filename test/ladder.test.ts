@@ -16,9 +16,7 @@ describe('nextLadderStep', () => {
   });
 
   it('returns the next model from the middle of the ladder', () => {
-    expect(nextLadderStep('anthropic/claude-sonnet-4-6', ladder)).toBe(
-      'anthropic/claude-opus-4-7',
-    );
+    expect(nextLadderStep('anthropic/claude-sonnet-4-6', ladder)).toBe('anthropic/claude-opus-4-7');
   });
 
   it('returns null when the current model is the top rung', () => {

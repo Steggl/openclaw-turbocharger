@@ -32,10 +32,7 @@
  * `Anthropic/Claude-Haiku-4-5` are not the same model) and we do not
  * silently normalize.
  */
-export function nextLadderStep(
-  currentModel: string,
-  ladder: readonly string[],
-): string | null {
+export function nextLadderStep(currentModel: string, ladder: readonly string[]): string | null {
   if (ladder.length === 0) return null;
   const index = ladder.indexOf(currentModel);
   if (index === -1) return null;
@@ -50,10 +47,7 @@ export function nextLadderStep(
  * the configured `maxDepth` still allows it but the ladder has nothing
  * more to offer.
  */
-export function remainingLadderSteps(
-  currentModel: string,
-  ladder: readonly string[],
-): number {
+export function remainingLadderSteps(currentModel: string, ladder: readonly string[]): number {
   if (ladder.length === 0) return 0;
   const index = ladder.indexOf(currentModel);
   if (index === -1) return 0;

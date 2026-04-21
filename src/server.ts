@@ -155,9 +155,7 @@ export function startServer(
     ...(deps?.orchestratorConfig !== undefined
       ? { orchestratorConfig: deps.orchestratorConfig }
       : {}),
-    ...(deps?.escalationConfig !== undefined
-      ? { escalationConfig: deps.escalationConfig }
-      : {}),
+    ...(deps?.escalationConfig !== undefined ? { escalationConfig: deps.escalationConfig } : {}),
   });
 
   const server = serve({
