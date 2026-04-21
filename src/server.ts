@@ -1,11 +1,12 @@
 // OpenAI-compatible HTTP server entry.
 //
-// Issue #2 introduced the pass-through proxy. Issue #5 adds an optional
-// orchestrator pipeline in front of the proxy: when `pipelineConfig` is
-// present in {@link AppDeps}, the request flows through
-// {@link runPipeline} instead of directly through
-// {@link forwardChatCompletion}, and the resulting decision is surfaced
-// in response headers and in the per-request log line.
+// Issue #2 introduced the pass-through proxy. Issue #5 added the optional
+// orchestrator pipeline. Issue #6 extends the same pipeline with a
+// ladder-escalation strategy: when the orchestrator decides `escalate`,
+// the pipeline loops through the configured ladder of models until the
+// response passes, the ladder is exhausted, or the configured maxDepth
+// is reached. All three are opt-in via AppDeps; the server falls back
+// to pass-through forwarding when orchestratorConfig is absent.
 
 import { fileURLToPath } from 'node:url';
 
@@ -17,6 +18,8 @@ import { runPipeline } from './pipeline.js';
 import { forwardChatCompletion } from './proxy.js';
 import type {
   AppConfig,
+  EscalationConfig,
+  EscalationTrace,
   OrchestratorConfig,
   OrchestratorDecision,
   ProxyTarget,
@@ -29,22 +32,31 @@ export interface AppDeps {
   /** Optional logger override; defaults to one JSON object per line on stderr. */
   readonly logger?: RequestLogger;
   /**
-   * Optional orchestrator configuration. When present, the server runs
-   * the full {@link runPipeline} (proxy + orchestrator) and adds
-   * X-Turbocharger-* response headers and a decision field to the log
-   * line. When absent, the server falls back to the pass-through proxy
-   * behaviour from issue #2.
+   * Optional orchestrator configuration. When present, requests flow
+   * through {@link runPipeline}; otherwise the server is a pure
+   * pass-through proxy (issue #2 behaviour).
    */
   readonly orchestratorConfig?: OrchestratorConfig;
+  /**
+   * Optional escalation configuration. Only consulted when
+   * `orchestratorConfig` is also present. When absent, the pipeline runs
+   * the orchestrator but never re-queries — decisions are reported via
+   * headers and logs only (issue #5 behaviour).
+   */
+  readonly escalationConfig?: EscalationConfig;
 }
 
 /**
- * Per-request log entry with an optional orchestrator decision field.
- * Extends {@link RequestLogEntry} without modifying its narrow shape.
+ * Per-request log entry with optional orchestrator and escalation fields.
+ * Extends {@link RequestLogEntry} without changing its base shape so that
+ * non-pipeline requests keep emitting the narrower object.
  */
 export interface DecisionLogEntry extends RequestLogEntry {
   readonly decision?: OrchestratorDecision['kind'];
   readonly decision_reason?: string;
+  readonly escalation_depth?: number;
+  readonly escalation_stopped?: EscalationTrace['stoppedReason'];
+  readonly escalation_path?: readonly string[];
 }
 
 const defaultLogger: RequestLogger = (entry) => {
@@ -65,13 +77,26 @@ export function createApp(deps: AppDeps): Hono {
     let status = 0;
     let decisionKind: OrchestratorDecision['kind'] | undefined;
     let decisionReason: string | undefined;
+    let escalationDepth: number | undefined;
+    let escalationStopped: EscalationTrace['stoppedReason'] | undefined;
+    let escalationPath: readonly string[] | undefined;
     try {
       if (deps.orchestratorConfig !== undefined) {
-        const result = await runPipeline(c.req.raw, deps.proxyTarget, deps.orchestratorConfig);
+        const result = await runPipeline(
+          c.req.raw,
+          deps.proxyTarget,
+          deps.orchestratorConfig,
+          deps.escalationConfig,
+        );
         status = result.response.status;
         decisionKind = result.decision.kind;
         if (result.decision.kind === 'escalate' || result.decision.kind === 'skipped') {
           decisionReason = result.decision.reason;
+        }
+        escalationDepth = result.trace.depth;
+        escalationStopped = result.trace.stoppedReason;
+        if (result.trace.path.length > 0) {
+          escalationPath = result.trace.path;
         }
         return result.response;
       }
@@ -79,12 +104,6 @@ export function createApp(deps: AppDeps): Hono {
       status = downstream.status;
       return downstream;
     } catch (err) {
-      // The fetch call itself failed (downstream unreachable, DNS failure,
-      // connection reset before any HTTP response). Surface as 502 with a
-      // diagnostic body. HTTP-level errors from a reachable downstream go
-      // through the success branch above and are forwarded verbatim — the
-      // sidecar never invents its own error status when the downstream
-      // produced one.
       status = 502;
       const message = err instanceof Error ? err.message : 'unknown error';
       return c.json(
@@ -105,6 +124,9 @@ export function createApp(deps: AppDeps): Hono {
         latency_ms: Date.now() - start,
         ...(decisionKind !== undefined ? { decision: decisionKind } : {}),
         ...(decisionReason !== undefined ? { decision_reason: decisionReason } : {}),
+        ...(escalationDepth !== undefined ? { escalation_depth: escalationDepth } : {}),
+        ...(escalationStopped !== undefined ? { escalation_stopped: escalationStopped } : {}),
+        ...(escalationPath !== undefined ? { escalation_path: escalationPath } : {}),
       };
       log(entry);
     }
@@ -115,15 +137,10 @@ export function createApp(deps: AppDeps): Hono {
 
 /** Handle returned by {@link startServer} for graceful shutdown. */
 export interface RunningServer {
-  /** The address the server is listening on, for tests that bind port 0. */
   readonly port: number;
   close(): Promise<void>;
 }
 
-/**
- * Start the sidecar HTTP server on the configured port. Returns a handle
- * with a `close()` for graceful shutdown.
- */
 export function startServer(
   config: AppConfig = loadEnvConfig(),
   deps?: Omit<AppDeps, 'proxyTarget'>,
@@ -137,6 +154,9 @@ export function startServer(
     ...(deps?.logger !== undefined ? { logger: deps.logger } : {}),
     ...(deps?.orchestratorConfig !== undefined
       ? { orchestratorConfig: deps.orchestratorConfig }
+      : {}),
+    ...(deps?.escalationConfig !== undefined
+      ? { escalationConfig: deps.escalationConfig }
       : {}),
   });
 
@@ -157,9 +177,6 @@ export function startServer(
   };
 }
 
-// Self-execution guard: running `node dist/server.js` boots the server;
-// importing the module from another file does not. Standard Node ESM
-// idiom for "is this the entry point".
 const isDirectRun = (() => {
   if (process.argv[1] === undefined) return false;
   try {

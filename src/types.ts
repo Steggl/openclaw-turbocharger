@@ -3,7 +3,8 @@
 // consistent. Issue #2 introduces the minimal surface needed for the
 // pass-through proxy; issue #3 adds the hard-signal detection surface;
 // issue #4 adds the LLM-critic surface; issue #5 adds the orchestrator and
-// pipeline surfaces; later issues extend further.
+// pipeline surfaces; issue #6 adds the escalation surface; later issues
+// extend further.
 
 /**
  * Effective configuration for a running sidecar process.
@@ -311,3 +312,82 @@ export type Orchestrator = (
   input: OrchestratorInput,
   config: OrchestratorConfig,
 ) => Promise<OrchestratorDecision>;
+
+// ---------------------------------------------------------------------------
+// Escalation (issue #6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Mode of escalation selected when an {@link OrchestratorDecision} is
+ * `kind: 'escalate'`.
+ *
+ * - `ladder`: step up a user-configured chain of model IDs one rung at a
+ *   time. Issue #6.
+ * - `max`: jump directly to a single configured maximum-performance
+ *   model. Issue #7 (stub in #6).
+ * - `chorus`: dispatch to an external chorus endpoint for multi-model
+ *   consensus. Issue #8 (interface only; no implementation in v0.1).
+ */
+export type EscalationMode = 'ladder' | 'max' | 'chorus';
+
+/**
+ * Configuration for the escalation strategy. Per ADR-0016, the ladder is
+ * a flat list of model IDs addressed against the single configured
+ * downstream {@link ProxyTarget}; per-model baseUrls are deliberately
+ * out of scope for v0.1.
+ *
+ * Per ADR-0018 the default for `maxDepth` is 2 (one initial attempt plus
+ * up to two escalations, i.e. the client sees an answer from at most the
+ * third ladder step). Callers must supply it explicitly; there are no
+ * silent defaults at this layer.
+ */
+export interface EscalationConfig {
+  readonly mode: EscalationMode;
+  /**
+   * Ordered list of model IDs from weakest to strongest. The ladder's
+   * semantics: the client-supplied `model` field in the request body
+   * locates the current position; escalation advances to the next
+   * entry. When the current model is not on the ladder, or the ladder
+   * is exhausted, {@link nextLadderStep} returns `null` and the
+   * pipeline preserves the last attempted response.
+   */
+  readonly ladder: readonly string[];
+  /**
+   * Optional max-mode target. Required when `mode === 'max'`; unused
+   * in `ladder` mode. Issue #7 makes this operational.
+   */
+  readonly maxModel?: string;
+  /**
+   * Optional chorus endpoint. Required when `mode === 'chorus'`;
+   * unused in other modes. Issue #8 makes this operational.
+   */
+  readonly chorusEndpoint?: string;
+  /**
+   * Maximum number of escalation steps. `0` disables escalation
+   * (decisions are reported but no re-query happens). `1` allows one
+   * escalation and then freezes on whatever that produced. Per ADR-0018
+   * the recommended default is `2`.
+   */
+  readonly maxDepth: number;
+}
+
+/**
+ * Result of one escalation attempt, as recorded on the response headers
+ * and in the log line. Distinct from {@link OrchestratorDecision}: the
+ * orchestrator decides whether an escalation is warranted; the
+ * escalation result records what happened when the pipeline acted on
+ * that decision.
+ */
+export interface EscalationTrace {
+  /** The model ID each escalation step targeted, in order. */
+  readonly path: readonly string[];
+  /** Why the pipeline stopped escalating. */
+  readonly stoppedReason:
+    | 'passed'
+    | 'max_depth_reached'
+    | 'ladder_exhausted'
+    | 'model_not_on_ladder'
+    | 'not_attempted';
+  /** How many re-queries actually ran (0 when the first response passed). */
+  readonly depth: number;
+}
