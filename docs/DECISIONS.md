@@ -841,3 +841,50 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
 - **Related:** issue #6 (this ADR); issue #11 will introduce the
   Zod schema that materializes the default in the validated config
   loader.
+
+## ADR-0019: Max-mode requires an explicit maxModel, and respects maxDepth
+
+- **Date:** 2026-04-21
+- **Status:** accepted
+- **Decision:** When `EscalationConfig.mode === 'max'`, the pipeline
+  resolves the target model exclusively from `config.maxModel`. If
+  `maxModel` is unset or an empty string, the pipeline records
+  `stoppedReason: 'max_model_not_set'` and performs no re-query. Max-
+  mode also respects `maxDepth`: `maxDepth === 0` disables escalation
+  for any mode, keeping the "kill switch" semantics uniform between
+  ladder and max.
+- **Rationale:** The point of max-mode is "skip straight to the
+  configured best model when the first attempt is inadequate". If the
+  best model is not configured, the correct response is to surface
+  the configuration gap, not to invent a fallback. A hidden fallback
+  (e.g. "use the top of `ladder` when `maxModel` is unset") would
+  degrade a configuration error into silently different behaviour:
+  users would see max-mode responses that look like ladder responses,
+  with no clear signal that they had forgotten to set `maxModel`.
+  Propagating `max_model_not_set` through the trace makes the
+  configuration mistake loud and auditable. The `maxDepth` decision
+  is pragmatic consistency: a single mental model ("maxDepth gates
+  all escalation, regardless of mode") is easier to reason about at
+  the config level than "maxDepth means N for ladder but always 1
+  for max", and max-mode users who want the single-jump behaviour
+  can leave `maxDepth` at its default (2) or set it to 1 — the extra
+  budget for max-mode is unused and harmless, since max performs
+  exactly one jump by construction.
+- **Alternatives considered:**
+  - _Fall back to the top of `ladder` when `maxModel` is unset._
+    Rejected: hides a configuration error by producing ladder-like
+    output in a max-mode deployment. Users would not realize the
+    config is wrong until someone audited the actual flow.
+  - _Make max-mode ignore `maxDepth` and always jump once._ Rejected:
+    breaks the "maxDepth is the uniform kill switch" guarantee that
+    makes it easy to disable all escalation for debugging or
+    rollback scenarios. The minor inconvenience of a user setting
+    `maxDepth: 1` for a strict single-jump max is worth the
+    conceptual consistency.
+  - _Fall back to some well-known provider default (e.g. "gpt-4")._
+    Rejected: any baked-in default is a business-relationship
+    assumption we should not make on behalf of the user.
+- **Related:** issue #7; ADR-0016 (ladder and max both address a
+  single downstream); ADR-0018 (maxDepth default is 2, which
+  continues to be the recommended default for max-mode too despite
+  max using at most one of those two available slots).
