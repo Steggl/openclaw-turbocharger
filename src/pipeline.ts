@@ -32,6 +32,7 @@
 
 import { runOrchestrator } from './critic/orchestrator.js';
 import { nextLadderStep } from './escalation/ladder.js';
+import { maxStep } from './escalation/max.js';
 import { forwardChatCompletion } from './proxy.js';
 import type {
   EscalationConfig,
@@ -336,25 +337,38 @@ export async function runPipeline(
   // Escalation loop. Runs only when:
   //   - the orchestrator decided `escalate`,
   //   - an escalation config is provided,
-  //   - the mode is `ladder` (other modes fall through untouched; issues #7/#8),
+  //   - the mode is `ladder` or `max` (chorus falls through; issue #8),
   //   - `maxDepth` has not yet been spent,
-  //   - a next ladder step exists.
+  //   - a next target model can be resolved (strategy-specific).
   while (
     currentDecision.kind === 'escalate' &&
     escalationConfig !== undefined &&
-    escalationConfig.mode === 'ladder' &&
+    (escalationConfig.mode === 'ladder' || escalationConfig.mode === 'max') &&
     depth < escalationConfig.maxDepth
   ) {
-    const next = nextLadderStep(currentModel, escalationConfig.ladder);
-    if (next === null) {
-      // Current model isn't on the ladder, or we're at the top. Stop
-      // with an informative reason so monitors can distinguish the two
-      // off-ladder cases from actual ladder exhaustion.
-      stoppedReason =
-        escalationConfig.ladder.indexOf(currentModel) === -1
-          ? 'model_not_on_ladder'
-          : 'ladder_exhausted';
-      break;
+    // Strategy dispatch: resolve the next target model. Ladder walks
+    // one rung; max returns the configured maxModel (once) or null
+    // when it is unset. Per ADR-0019, a null from maxStep is a
+    // configuration error, not a silent fallback to another strategy.
+    let next: string | null;
+    if (escalationConfig.mode === 'max') {
+      next = maxStep(escalationConfig);
+      if (next === null) {
+        stoppedReason = 'max_model_not_set';
+        break;
+      }
+    } else {
+      next = nextLadderStep(currentModel, escalationConfig.ladder);
+      if (next === null) {
+        // Current model isn't on the ladder, or we're at the top. Stop
+        // with an informative reason so monitors can distinguish the two
+        // off-ladder cases from actual ladder exhaustion.
+        stoppedReason =
+          escalationConfig.ladder.indexOf(currentModel) === -1
+            ? 'model_not_on_ladder'
+            : 'ladder_exhausted';
+        break;
+      }
     }
 
     path.push(next);
@@ -397,6 +411,15 @@ export async function runPipeline(
       break;
     }
     if (depth >= escalationConfig.maxDepth) {
+      stoppedReason = 'max_depth_reached';
+      break;
+    }
+    // Max mode does exactly one re-query per invocation: after the
+    // orchestrator evaluates the re-queried response, there is no
+    // further target to escalate to. If the decision is still
+    // `escalate`, we stop with max_depth_reached (semantically:
+    // "we used the one jump we had").
+    if (escalationConfig.mode === 'max') {
       stoppedReason = 'max_depth_reached';
       break;
     }
