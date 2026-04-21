@@ -387,6 +387,7 @@ export interface EscalationTrace {
     | 'max_depth_reached'
     | 'ladder_exhausted'
     | 'model_not_on_ladder'
+    | 'max_model_not_set'
     | 'not_attempted';
   /** How many re-queries actually ran (0 when the first response passed). */
   readonly depth: number;
