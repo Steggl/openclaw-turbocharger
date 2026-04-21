@@ -67,9 +67,7 @@ async function parseClientRequest(request: Request): Promise<ParsedRequest> {
   const model = readString(parsed, 'model') ?? '';
   const locale = readString(parsed, 'locale') ?? readHeaderLocale(request);
   const body =
-    parsed !== null && typeof parsed === 'object'
-      ? (parsed as Record<string, unknown>)
-      : null;
+    parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
 
   return {
     stream,

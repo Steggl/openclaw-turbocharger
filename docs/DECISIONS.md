@@ -727,7 +727,7 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
   configured downstream `ProxyTarget`; per-rung `baseUrl` and
   `apiKey` are deliberately out of scope for v0.1.
 - **Rationale:** The brief (§3 "Downstream targets") describes the
-  typical deployment as the sidecar sitting in front of *one* route
+  typical deployment as the sidecar sitting in front of _one_ route
   — a local Ollama, a hosted aggregator (OpenRouter, ClawRouter,
   iblai-router, openmark-router), or a single provider endpoint.
   Aggregators already expose many providers behind one base URL
@@ -791,7 +791,7 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
     which the issue #5 pipeline established as off-limits outside
     the explicit transparency modes of issues #9/#10.
   - _Expose the originals via a separate API endpoint (`GET
-    /v1/traces/{id}`)._ Rejected for v0.1: would require request-id
+/v1/traces/{id}`)._ Rejected for v0.1: would require request-id
     generation and an audit-log backing store. Tracked in the
     post-MVP backlog; see ADR-0007 on the audit-log tier.
 - **Related:** issue #6 (this ADR); issues #9 and #10 for the body-
