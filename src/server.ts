@@ -133,8 +133,7 @@ export function createApp(deps: AppDeps): Hono {
         // Chorus mode: orchestratorConfig is not required; pipeline
         // dispatches directly to the chorus endpoint.
         answerMode = 'chorus';
-        const orchestratorConfig =
-          deps.orchestratorConfig ?? CHORUS_NOOP_ORCHESTRATOR_CONFIG;
+        const orchestratorConfig = deps.orchestratorConfig ?? CHORUS_NOOP_ORCHESTRATOR_CONFIG;
         const result = await runPipeline({
           request: c.req.raw,
           target: deps.proxyTarget,
@@ -238,13 +237,9 @@ export function startServer(
     ...(deps?.orchestratorConfig !== undefined
       ? { orchestratorConfig: deps.orchestratorConfig }
       : {}),
-    ...(deps?.escalationConfig !== undefined
-      ? { escalationConfig: deps.escalationConfig }
-      : {}),
+    ...(deps?.escalationConfig !== undefined ? { escalationConfig: deps.escalationConfig } : {}),
     ...(deps?.chorusConfig !== undefined ? { chorusConfig: deps.chorusConfig } : {}),
-    ...(deps?.defaultAnswerMode !== undefined
-      ? { defaultAnswerMode: deps.defaultAnswerMode }
-      : {}),
+    ...(deps?.defaultAnswerMode !== undefined ? { defaultAnswerMode: deps.defaultAnswerMode } : {}),
   });
 
   const server = serve({

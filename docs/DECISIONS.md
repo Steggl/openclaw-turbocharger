@@ -1037,7 +1037,7 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
 - **Mechanical scope of the refactor:**
   - EscalationMode: remove 'chorus'.
   - EscalationConfig: remove chorusEndpoint and chorusTimeoutMs.
-  - EscalationTrace.stoppedReason: remove the four chorus_*
+  - EscalationTrace.stoppedReason: remove the four chorus\_\*
     values.
   - New types: AnswerMode, ChorusConfig, ChorusTrace.
   - src/escalation/chorus.ts moves to src/chorus/dispatch.ts (new
