@@ -70,9 +70,7 @@ const DEFAULT_WEIGHTS: SignalWeights = {
   syntax_error: 1,
 };
 
-function makeOrchestratorConfig(
-  overrides: Partial<OrchestratorConfig> = {},
-): OrchestratorConfig {
+function makeOrchestratorConfig(overrides: Partial<OrchestratorConfig> = {}): OrchestratorConfig {
   return {
     threshold: 0.6,
     weights: DEFAULT_WEIGHTS,
