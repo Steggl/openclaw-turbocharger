@@ -125,7 +125,7 @@ describe('dispatchChorus', () => {
   it('forwards context headers on top of client headers', async () => {
     let captured: Headers | undefined;
     const fetchImpl: typeof fetch = async (_url, init) => {
-      captured = new Headers(init?.headers as HeadersInit);
+      captured = new Headers(init?.headers);
       return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
     };
 
@@ -152,7 +152,7 @@ describe('dispatchChorus', () => {
   it('strips hop-by-hop headers per RFC 7230', async () => {
     let captured: Headers | undefined;
     const fetchImpl: typeof fetch = async (_url, init) => {
-      captured = new Headers(init?.headers as HeadersInit);
+      captured = new Headers(init?.headers);
       return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
     };
 
