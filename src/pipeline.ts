@@ -33,6 +33,7 @@
 import { runOrchestrator } from './critic/orchestrator.js';
 import { nextLadderStep } from './escalation/ladder.js';
 import { maxStep } from './escalation/max.js';
+import { dispatchChorus } from './escalation/chorus.js';
 import { forwardChatCompletion } from './proxy.js';
 import type {
   EscalationConfig,
@@ -334,6 +335,82 @@ export async function runPipeline(
     stoppedReason = 'passed';
   }
 
+  // Chorus dispatch (issue #8). Runs only when:
+  //   - the orchestrator decided `escalate`,
+  //   - an escalation config is provided,
+  //   - the mode is `chorus`,
+  //   - `maxDepth` is > 0 (keeps the kill switch uniform with ladder
+  //     and max; per ADR-0018 and ADR-0019 maxDepth=0 means "no
+  //     escalation for any mode").
+  //
+  // Unlike the ladder/max loop, chorus goes to a different HTTP
+  // endpoint (not the configured ProxyTarget) and its response is
+  // forwarded verbatim — no orchestrator re-evaluation. Per ADR-0020
+  // the dispatch is hard-fail: any error classifies the stop reason
+  // and the original inadequate response is returned to the client.
+  if (
+    currentDecision.kind === 'escalate' &&
+    escalationConfig !== undefined &&
+    escalationConfig.mode === 'chorus' &&
+    escalationConfig.maxDepth > 0
+  ) {
+    const chorusResult = await dispatchChorus(escalationConfig, {
+      bodyBytes: currentBodyText.length > 0 ? getOriginalRequestBody(parsed) : '{}',
+      clientHeaders: request.headers,
+      contextHeaders: buildChorusContextHeaders(currentDecision, escalationConfig),
+    });
+
+    if (chorusResult.kind === 'ok') {
+      const chorusBodyText = await chorusResult.response.text();
+      const chorusContentType = chorusResult.response.headers.get('content-type') ?? '';
+      if (chorusContentType.toLowerCase().includes('application/json')) {
+        // The chorus response is forwarded as-is. We re-run the
+        // orchestrator so the decision on the response is honest —
+        // but we do not act on an `escalate` decision here because
+        // chorus has no further step to take. The decision is
+        // reported via headers, the body is the chorus answer.
+        const chorusAssistant = parseChatCompletionBody(safeJsonParse(chorusBodyText));
+        const chorusDecision = await runOrchestrator(
+          buildOrchestratorInput(chorusAssistant, parsed),
+          orchestratorConfig,
+        );
+        currentDecision = chorusDecision;
+        currentBodyText = chorusBodyText;
+        currentResponse = chorusResult.response;
+        path.push('chorus');
+        depth = 1;
+        stoppedReason = chorusDecision.kind === 'pass' ? 'passed' : 'max_depth_reached';
+      } else {
+        // Chorus returned non-JSON. Forward the bytes as-is, record
+        // the stop reason, and keep the original decision (so the
+        // client still sees that escalation was attempted).
+        currentBodyText = chorusBodyText;
+        currentResponse = chorusResult.response;
+        path.push('chorus');
+        depth = 1;
+        stoppedReason = 'max_depth_reached';
+      }
+    } else {
+      // Classified chorus error. Keep the original (inadequate)
+      // response body for the client and record the specific stop
+      // reason for monitors and the transparency layer.
+      switch (chorusResult.reason) {
+        case 'endpoint_not_set':
+          stoppedReason = 'chorus_endpoint_not_set';
+          break;
+        case 'unreachable':
+          stoppedReason = 'chorus_unreachable';
+          break;
+        case 'timeout':
+          stoppedReason = 'chorus_timeout';
+          break;
+        case 'non_ok_status':
+          stoppedReason = 'chorus_non_ok_status';
+          break;
+      }
+    }
+  }
+
   // Escalation loop. Runs only when:
   //   - the orchestrator decided `escalate`,
   //   - an escalation config is provided,
@@ -457,4 +534,47 @@ function buildOrchestratorInput(
     ...(assistant.finishReason !== undefined ? { finishReason: assistant.finishReason } : {}),
     ...(parsed.locale !== undefined ? { locale: parsed.locale } : {}),
   };
+}
+
+/**
+ * Serialise the client's original request body for forwarding to the
+ * chorus endpoint. If parsing failed upstream (parsed.body is null),
+ * fall back to an empty JSON object — the chorus server will return
+ * a 4xx which we will classify as non_ok_status.
+ */
+function getOriginalRequestBody(parsed: ParsedRequest): string {
+  if (parsed.body === null) return '{}';
+  return JSON.stringify(parsed.body);
+}
+
+/**
+ * Build the per-request context headers the chorus endpoint receives
+ * on top of the client's forwarded headers. Per ADR-0020 the chorus
+ * protocol is OpenAI-compatible; the context is provided through
+ * `X-Turbocharger-*` headers so a chorus server can optionally make
+ * use of it without requiring a non-standard request body shape.
+ */
+function buildChorusContextHeaders(
+  decision: OrchestratorDecision,
+  config: EscalationConfig,
+): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (decision.kind === 'escalate') {
+    headers['x-turbocharger-reason'] = decision.reason;
+    headers['x-turbocharger-aggregate'] = decision.aggregate.toFixed(3);
+    if (decision.signals.length > 0) {
+      headers['x-turbocharger-signals'] = decision.signals.map((s) => s.category).join(',');
+    }
+    if (decision.verdict !== undefined) {
+      headers['x-turbocharger-verdict'] = decision.verdict.verdict;
+      headers['x-turbocharger-verdict-confidence'] = decision.verdict.confidence.toFixed(3);
+    }
+  }
+  if (config.ladder.length > 0) {
+    headers['x-turbocharger-ladder'] = config.ladder.join(',');
+  }
+  if (config.maxModel !== undefined && config.maxModel.length > 0) {
+    headers['x-turbocharger-max-model'] = config.maxModel;
+  }
+  return headers;
 }

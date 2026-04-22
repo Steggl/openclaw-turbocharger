@@ -359,9 +359,22 @@ export interface EscalationConfig {
   readonly maxModel?: string;
   /**
    * Optional chorus endpoint. Required when `mode === 'chorus'`;
-   * unused in other modes. Issue #8 makes this operational.
+   * unused in other modes. Issue #8 makes this operational as an
+   * interface-only stub (see ADR-0020): the pipeline POSTs the
+   * original request to this URL and forwards the response as-is.
+   * Full chorus logic lives in the separate `openclaw-chorus`
+   * project and is not in scope here.
    */
   readonly chorusEndpoint?: string;
+  /**
+   * Optional per-request timeout for chorus dispatch, in
+   * milliseconds. Measured from the moment the sidecar sends the
+   * HTTP request to the moment the full response body has arrived.
+   * Applies only to `mode === 'chorus'`; ladder and max re-queries
+   * use the default client behaviour of {@link forwardChatCompletion}.
+   * When absent, {@link DEFAULT_CHORUS_TIMEOUT_MS} is used.
+   */
+  readonly chorusTimeoutMs?: number;
   /**
    * Maximum number of escalation steps. `0` disables escalation
    * (decisions are reported but no re-query happens). `1` allows one
@@ -388,7 +401,48 @@ export interface EscalationTrace {
     | 'ladder_exhausted'
     | 'model_not_on_ladder'
     | 'max_model_not_set'
+    | 'chorus_endpoint_not_set'
+    | 'chorus_unreachable'
+    | 'chorus_timeout'
+    | 'chorus_non_ok_status'
     | 'not_attempted';
   /** How many re-queries actually ran (0 when the first response passed). */
   readonly depth: number;
 }
+
+// ---------------------------------------------------------------------------
+// Chorus dispatch (issue #8, stub)
+// ---------------------------------------------------------------------------
+
+/**
+ * Default timeout for chorus dispatch, in milliseconds. See ADR-0020
+ * for the rationale behind 90 seconds: chorus endpoints fan out to
+ * several models in parallel and synthesise a combined answer, which
+ * is substantially slower than a single model call. Callers can
+ * override via {@link EscalationConfig.chorusTimeoutMs}.
+ */
+export const DEFAULT_CHORUS_TIMEOUT_MS = 90_000;
+
+/**
+ * Discriminated result of a chorus dispatch attempt.
+ *
+ * Per ADR-0020 the chorus dispatch is hard-fail: if the endpoint is
+ * unset, unreachable, timed out, or returned a non-2xx status, the
+ * pipeline does not fall back to another escalation strategy. It
+ * returns the relevant `error` result and the pipeline's trace
+ * records the corresponding `stoppedReason`.
+ */
+export type ChorusDispatchResult =
+  | {
+      readonly kind: 'ok';
+      readonly response: Response;
+    }
+  | {
+      readonly kind: 'error';
+      readonly reason:
+        | 'endpoint_not_set'
+        | 'unreachable'
+        | 'timeout'
+        | 'non_ok_status';
+      readonly detail: string;
+    };
