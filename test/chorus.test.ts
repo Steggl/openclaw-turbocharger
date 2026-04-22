@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { dispatchChorus } from '../src/escalation/chorus.js';
-import { DEFAULT_CHORUS_TIMEOUT_MS, type EscalationConfig } from '../src/types.js';
+import { dispatchChorus } from '../src/chorus/dispatch.js';
+import { DEFAULT_CHORUS_TIMEOUT_MS, type ChorusConfig } from '../src/types.js';
 
-function makeConfig(overrides: Partial<EscalationConfig> = {}): EscalationConfig {
+function makeConfig(overrides: Partial<ChorusConfig> = {}): ChorusConfig {
   return {
-    mode: 'chorus',
-    ladder: [],
-    maxDepth: 1,
+    endpoint: '',
     ...overrides,
   };
 }
@@ -24,16 +22,8 @@ function makeInput(
 }
 
 describe('dispatchChorus', () => {
-  it('returns endpoint_not_set when chorusEndpoint is undefined', async () => {
+  it('returns endpoint_not_set when endpoint is an empty string', async () => {
     const result = await dispatchChorus(makeConfig(), makeInput());
-    expect(result.kind).toBe('error');
-    if (result.kind === 'error') {
-      expect(result.reason).toBe('endpoint_not_set');
-    }
-  });
-
-  it('returns endpoint_not_set when chorusEndpoint is an empty string', async () => {
-    const result = await dispatchChorus(makeConfig({ chorusEndpoint: '' }), makeInput());
     expect(result.kind).toBe('error');
     if (result.kind === 'error') {
       expect(result.reason).toBe('endpoint_not_set');
@@ -48,7 +38,7 @@ describe('dispatchChorus', () => {
       });
 
     const result = await dispatchChorus(
-      makeConfig({ chorusEndpoint: 'http://example.test/v1/chat/completions' }),
+      makeConfig({ endpoint: 'http://example.test/v1/chat/completions' }),
       makeInput({ fetchImpl }),
     );
     expect(result.kind).toBe('ok');
@@ -60,7 +50,7 @@ describe('dispatchChorus', () => {
   it('returns non_ok_status when the endpoint responds 500', async () => {
     const fetchImpl: typeof fetch = async () => new Response('boom', { status: 500 });
     const result = await dispatchChorus(
-      makeConfig({ chorusEndpoint: 'http://example.test/v1/chat/completions' }),
+      makeConfig({ endpoint: 'http://example.test/v1/chat/completions' }),
       makeInput({ fetchImpl }),
     );
     expect(result.kind).toBe('error');
@@ -75,7 +65,7 @@ describe('dispatchChorus', () => {
       throw new TypeError('fetch failed: getaddrinfo ENOTFOUND example.invalid');
     };
     const result = await dispatchChorus(
-      makeConfig({ chorusEndpoint: 'http://example.invalid/' }),
+      makeConfig({ endpoint: 'http://example.invalid/' }),
       makeInput({ fetchImpl }),
     );
     expect(result.kind).toBe('error');
@@ -92,7 +82,7 @@ describe('dispatchChorus', () => {
       throw err;
     };
     const result = await dispatchChorus(
-      makeConfig({ chorusEndpoint: 'http://example.test/', chorusTimeoutMs: 10 }),
+      makeConfig({ endpoint: 'http://example.test/', timeoutMs: 10 }),
       makeInput({ fetchImpl }),
     );
     expect(result.kind).toBe('error');
@@ -102,17 +92,14 @@ describe('dispatchChorus', () => {
     }
   });
 
-  it('uses DEFAULT_CHORUS_TIMEOUT_MS when chorusTimeoutMs is unset', async () => {
-    // We cannot easily assert the actual setTimeout delay without
-    // time-travel, so verify indirectly: the detail for a timeout
-    // error reports the default value when no override is set.
+  it('uses DEFAULT_CHORUS_TIMEOUT_MS when timeoutMs is unset', async () => {
     const fetchImpl: typeof fetch = async () => {
       const err = new Error('aborted');
       err.name = 'AbortError';
       throw err;
     };
     const result = await dispatchChorus(
-      makeConfig({ chorusEndpoint: 'http://example.test/' }),
+      makeConfig({ endpoint: 'http://example.test/' }),
       makeInput({ fetchImpl }),
     );
     expect(result.kind).toBe('error');
@@ -130,23 +117,21 @@ describe('dispatchChorus', () => {
     };
 
     await dispatchChorus(
-      makeConfig({ chorusEndpoint: 'http://example.test/' }),
+      makeConfig({ endpoint: 'http://example.test/' }),
       makeInput({
         clientHeaders: new Headers({
           'content-type': 'application/json',
           authorization: 'Bearer xyz',
         }),
         contextHeaders: {
-          'x-turbocharger-reason': 'hard_signals',
-          'x-turbocharger-aggregate': '0.712',
+          'x-turbocharger-answer-mode': 'chorus',
         },
         fetchImpl,
       }),
     );
 
     expect(captured?.get('authorization')).toBe('Bearer xyz');
-    expect(captured?.get('x-turbocharger-reason')).toBe('hard_signals');
-    expect(captured?.get('x-turbocharger-aggregate')).toBe('0.712');
+    expect(captured?.get('x-turbocharger-answer-mode')).toBe('chorus');
   });
 
   it('strips hop-by-hop headers per RFC 7230', async () => {
@@ -157,7 +142,7 @@ describe('dispatchChorus', () => {
     };
 
     await dispatchChorus(
-      makeConfig({ chorusEndpoint: 'http://example.test/' }),
+      makeConfig({ endpoint: 'http://example.test/' }),
       makeInput({
         clientHeaders: new Headers({
           'content-type': 'application/json',
