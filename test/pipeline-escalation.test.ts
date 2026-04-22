@@ -600,3 +600,300 @@ describe('pipeline escalation (max)', () => {
     expect(mock.bodies()).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Chorus-mode (issue #8)
+// ---------------------------------------------------------------------------
+
+describe('pipeline escalation (chorus)', () => {
+  let downstream: MockDownstream;
+  let chorus: MockDownstream;
+  let sidecar: RunningServer;
+  let sidecarBaseUrl: string;
+  let logs: DecisionLogEntry[];
+
+  beforeEach(async () => {
+    downstream = await startMockDownstream();
+    chorus = await startMockDownstream();
+    logs = [];
+  });
+
+  afterEach(async () => {
+    await sidecar.close();
+    await downstream.close();
+    await chorus.close();
+  });
+
+  it('dispatches to the chorus endpoint when the first response refuses', async () => {
+    sidecar = startServer(
+      { port: 0, downstreamBaseUrl: downstream.baseUrl },
+      {
+        logger: (entry) => {
+          logs.push(entry as DecisionLogEntry);
+        },
+        orchestratorConfig: makeOrchestratorConfig(),
+        escalationConfig: makeEscalationConfig({
+          mode: 'chorus',
+          ladder: [],
+          chorusEndpoint: `${chorus.baseUrl}/chat/completions`,
+          maxDepth: 1,
+        }),
+      },
+    );
+    sidecarBaseUrl = `http://127.0.0.1:${sidecar.port}`;
+
+    downstream.setHandler((_req, res, _body) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(buildChatCompletionBody("I'm sorry, I cannot help with that."));
+    });
+    chorus.setHandler((_req, res, _body) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        buildChatCompletionBody(
+          'Here is a clear, complete, helpful answer from the chorus with concrete details.',
+        ),
+      );
+    });
+
+    const res = await fetch(`${sidecarBaseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'weak-model',
+        messages: [{ role: 'user', content: 'Please help.' }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-turbocharger-decision')).toBe('pass');
+    expect(res.headers.get('x-turbocharger-escalation-depth')).toBe('1');
+    expect(res.headers.get('x-turbocharger-escalation-stopped')).toBe('passed');
+    expect(res.headers.get('x-turbocharger-escalation-path')).toBe('chorus');
+
+    const finalBody = await res.text();
+    expect(finalBody).toContain('clear, complete, helpful answer from the chorus');
+
+    expect(downstream.bodies()).toHaveLength(1);
+    expect(chorus.bodies()).toHaveLength(1);
+  });
+
+  it('reports chorus_endpoint_not_set when chorusEndpoint is unset', async () => {
+    sidecar = startServer(
+      { port: 0, downstreamBaseUrl: downstream.baseUrl },
+      {
+        logger: (entry) => {
+          logs.push(entry as DecisionLogEntry);
+        },
+        orchestratorConfig: makeOrchestratorConfig(),
+        escalationConfig: makeEscalationConfig({
+          mode: 'chorus',
+          ladder: [],
+          maxDepth: 1,
+          // chorusEndpoint intentionally omitted
+        }),
+      },
+    );
+    sidecarBaseUrl = `http://127.0.0.1:${sidecar.port}`;
+
+    downstream.setHandler((_req, res, _body) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(buildChatCompletionBody("I'm sorry, I cannot help."));
+    });
+
+    const res = await fetch(`${sidecarBaseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'weak-model',
+        messages: [{ role: 'user', content: 'help' }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-turbocharger-decision')).toBe('escalate');
+    expect(res.headers.get('x-turbocharger-escalation-stopped')).toBe('chorus_endpoint_not_set');
+    expect(res.headers.get('x-turbocharger-escalation-depth')).toBe('0');
+    expect(res.headers.get('x-turbocharger-escalation-path')).toBeNull();
+    expect(downstream.bodies()).toHaveLength(1);
+    expect(chorus.bodies()).toHaveLength(0);
+  });
+
+  it('reports chorus_non_ok_status when the endpoint responds 500', async () => {
+    sidecar = startServer(
+      { port: 0, downstreamBaseUrl: downstream.baseUrl },
+      {
+        logger: (entry) => {
+          logs.push(entry as DecisionLogEntry);
+        },
+        orchestratorConfig: makeOrchestratorConfig(),
+        escalationConfig: makeEscalationConfig({
+          mode: 'chorus',
+          ladder: [],
+          chorusEndpoint: `${chorus.baseUrl}/chat/completions`,
+          maxDepth: 1,
+        }),
+      },
+    );
+    sidecarBaseUrl = `http://127.0.0.1:${sidecar.port}`;
+
+    downstream.setHandler((_req, res, _body) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(buildChatCompletionBody("I'm sorry, I cannot help."));
+    });
+    chorus.setHandler((_req, res, _body) => {
+      res.writeHead(500);
+      res.end('chorus crashed');
+    });
+
+    const res = await fetch(`${sidecarBaseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'weak-model',
+        messages: [{ role: 'user', content: 'help' }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-turbocharger-decision')).toBe('escalate');
+    expect(res.headers.get('x-turbocharger-escalation-stopped')).toBe('chorus_non_ok_status');
+    expect(res.headers.get('x-turbocharger-escalation-depth')).toBe('0');
+    expect(downstream.bodies()).toHaveLength(1);
+    expect(chorus.bodies()).toHaveLength(1);
+  });
+
+  it('does not dispatch to chorus when the first response passes', async () => {
+    sidecar = startServer(
+      { port: 0, downstreamBaseUrl: downstream.baseUrl },
+      {
+        logger: (entry) => {
+          logs.push(entry as DecisionLogEntry);
+        },
+        orchestratorConfig: makeOrchestratorConfig(),
+        escalationConfig: makeEscalationConfig({
+          mode: 'chorus',
+          ladder: [],
+          chorusEndpoint: `${chorus.baseUrl}/chat/completions`,
+          maxDepth: 1,
+        }),
+      },
+    );
+    sidecarBaseUrl = `http://127.0.0.1:${sidecar.port}`;
+
+    downstream.setHandler((_req, res, _body) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        buildChatCompletionBody(
+          'Here is a clear, complete, helpful answer with concrete details and context.',
+        ),
+      );
+    });
+    chorus.setHandler((_req, res, _body) => {
+      res.writeHead(500);
+      res.end('should not be called');
+    });
+
+    const res = await fetch(`${sidecarBaseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'weak-model',
+        messages: [{ role: 'user', content: 'Explain briefly.' }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-turbocharger-decision')).toBe('pass');
+    expect(res.headers.get('x-turbocharger-escalation-depth')).toBe('0');
+    expect(res.headers.get('x-turbocharger-escalation-stopped')).toBe('passed');
+    expect(downstream.bodies()).toHaveLength(1);
+    expect(chorus.bodies()).toHaveLength(0);
+  });
+
+  it('respects maxDepth=0 and does not dispatch even when endpoint is set', async () => {
+    sidecar = startServer(
+      { port: 0, downstreamBaseUrl: downstream.baseUrl },
+      {
+        logger: (entry) => {
+          logs.push(entry as DecisionLogEntry);
+        },
+        orchestratorConfig: makeOrchestratorConfig(),
+        escalationConfig: makeEscalationConfig({
+          mode: 'chorus',
+          ladder: [],
+          chorusEndpoint: `${chorus.baseUrl}/chat/completions`,
+          maxDepth: 0,
+        }),
+      },
+    );
+    sidecarBaseUrl = `http://127.0.0.1:${sidecar.port}`;
+
+    downstream.setHandler((_req, res, _body) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(buildChatCompletionBody("I'm sorry, I cannot help."));
+    });
+    chorus.setHandler((_req, res, _body) => {
+      res.writeHead(500);
+      res.end('should not be called');
+    });
+
+    const res = await fetch(`${sidecarBaseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'weak-model',
+        messages: [{ role: 'user', content: 'help' }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-turbocharger-decision')).toBe('escalate');
+    expect(res.headers.get('x-turbocharger-escalation-depth')).toBe('0');
+    expect(res.headers.get('x-turbocharger-escalation-stopped')).toBe('not_attempted');
+    expect(chorus.bodies()).toHaveLength(0);
+  });
+
+  it('forwards X-Turbocharger-* context headers to the chorus endpoint', async () => {
+    sidecar = startServer(
+      { port: 0, downstreamBaseUrl: downstream.baseUrl },
+      {
+        logger: (entry) => {
+          logs.push(entry as DecisionLogEntry);
+        },
+        orchestratorConfig: makeOrchestratorConfig(),
+        escalationConfig: makeEscalationConfig({
+          mode: 'chorus',
+          ladder: ['weak-model', 'mid-model'],
+          chorusEndpoint: `${chorus.baseUrl}/chat/completions`,
+          maxDepth: 1,
+        }),
+      },
+    );
+    sidecarBaseUrl = `http://127.0.0.1:${sidecar.port}`;
+
+    let capturedHeaders: Record<string, string | string[] | undefined> | undefined;
+
+    downstream.setHandler((_req, res, _body) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(buildChatCompletionBody("I'm sorry, I cannot help."));
+    });
+    chorus.setHandler((req, res, _body) => {
+      capturedHeaders = req.headers;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(buildChatCompletionBody('chorus answer'));
+    });
+
+    await fetch(`${sidecarBaseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'weak-model',
+        messages: [{ role: 'user', content: 'help' }],
+      }),
+    });
+
+    expect(capturedHeaders).toBeDefined();
+    expect(capturedHeaders?.['x-turbocharger-reason']).toBe('hard_signals');
+    expect(capturedHeaders?.['x-turbocharger-ladder']).toBe('weak-model,mid-model');
+  });
+});
