@@ -965,3 +965,108 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
   it addresses a distinct endpoint); ADR-0019 (max-mode semantics
   — same hard-fail pattern for `max_model_not_set`); brief §5
   (original "graceful fallback" wording, revised here).
+
+## ADR-0021: Chorus is an AnswerMode, not an escalation strategy
+
+- **Date:** 2026-04-22
+- **Status:** accepted, supersedes part of ADR-0020
+- **Decision:** Chorus is re-classified from an escalation mode
+  (Issue #8, alongside ladder and max) to a parallel
+  {@link AnswerMode} that dispatches the client's request directly
+  to a configured chorus endpoint, bypassing the orchestrator and
+  the escalation loop entirely. `EscalationMode` shrinks to
+  `'ladder' | 'max'`; a new `AnswerMode = 'single' | 'chorus'` is
+  introduced at the pipeline's top level. Chorus configuration
+  (`endpoint`, `timeoutMs`) moves from `EscalationConfig` to a new
+  `ChorusConfig` wired independently on `AppDeps`. The hard-fail
+  policy from ADR-0020 is retained: a missing, unreachable,
+  timing-out, or error-responding chorus endpoint surfaces a
+  specific outcome rather than falling back to any other strategy.
+  The orchestrator does not run on chorus responses because chorus
+  itself is a meta-adequacy mechanism.
+- **Rationale:** Under ADR-0020 the pipeline ran the orchestrator
+  on the downstream response first, and only reached chorus when
+  the orchestrator decided `escalate`. That framing implied chorus
+  was a reactive fallback for adequacy failures — the user asked
+  a question, a cheap model refused, so the sidecar tried chorus
+  as the "strong" recovery option. But chorus's value proposition
+  is different: multi-model consensus with bias transparency and
+  minority reports. Users select chorus for a specific query
+  because they want that kind of answer, not because their cheap
+  model failed. Routing chorus through the escalation path had
+  three concrete problems. First, the banner text for chorus in
+  Issue #9's original scope would read "Escalated to chorus.
+  Reason: refusal pattern detected." — misleading, because the
+  chorus dispatch wasn't triggered by a refusal, it was the user's
+  chosen paradigm. Second, the orchestrator-then-chorus sequence
+  meant every chorus request incurred a downstream model call it
+  didn't need, wasting cost and latency. Third, re-running the
+  adequacy critic on a chorus response doesn't make sense: chorus
+  is supposed to surface minority reports and bias signals
+  explicitly, and a refusal-pattern detector downstream of that
+  would flag exactly the kind of "this is a hard question and
+  here's what different models said" output that chorus is
+  designed to produce. Separating `AnswerMode` from escalation
+  resolves all three issues: chorus users pay for one chorus call
+  and nothing more, the banner text can be honest about why
+  chorus was chosen (user selection, not adequacy failure), and
+  the orchestrator stays out of chorus's way.
+- **Alternatives considered:**
+  - _Keep chorus in escalation, neutralize the banner text._
+    Considered and rejected: the banner could be softened, but the
+    cost-per-chorus-call issue and the orchestrator-over-chorus-
+    response issue remained. Neutralising the language would be
+    cosmetic and would leave the architectural mismatch in place.
+  - _Chorus as a third answer mode on top of single (escalation
+    still runs)._ Considered: make chorus mode run the
+    orchestrator on the chorus response and escalate further if
+    the chorus answer is flagged. Rejected: chorus already
+    performs the multi-model consensus; escalating from a chorus
+    answer to another model would either contradict the chorus
+    synthesis or produce an answer that's strictly less
+    informative. Also, the chorus server is expected to handle
+    its own failure modes; the sidecar's role is to call it and
+    forward the result.
+  - _Hybrid: chorus as both a fallback (current) and a direct
+    mode (new)._ Considered: support both paths so existing users
+    aren't broken. Rejected: the current state is not in a
+    released version (the project has no v0.1.0 yet), so there
+    are no existing users to preserve. Two paths for chorus would
+    double the test surface and the mental model for no real
+    benefit.
+- **Mechanical scope of the refactor:**
+  - EscalationMode: remove 'chorus'.
+  - EscalationConfig: remove chorusEndpoint and chorusTimeoutMs.
+  - EscalationTrace.stoppedReason: remove the four chorus_*
+    values.
+  - New types: AnswerMode, ChorusConfig, ChorusTrace.
+  - src/escalation/chorus.ts moves to src/chorus/dispatch.ts (new
+    module root, since chorus is no longer escalation); the
+    dispatch function takes ChorusConfig instead of
+    EscalationConfig.
+  - src/pipeline.ts: runPipeline takes a PipelineInput bag with
+    an answerMode field and dispatches to runSinglePipeline or
+    runChorusPipeline. The chorus-inside-while-loop branch is
+    gone.
+  - src/server.ts: AppDeps gains chorusConfig and
+    defaultAnswerMode. DecisionLogEntry gains chorus_outcome and
+    chorus_detail.
+  - Test migration: Issue #8's chorus describe block moves from
+    test/pipeline-escalation.test.ts to a new
+    test/pipeline-chorus.test.ts, rewritten around the AnswerMode
+    paradigm.
+- **Consequences for downstream issues:**
+  - Issue #9 (transparency: banner) is simplified: the banner only
+    applies to single-mode escalation (ladder/max). Chorus-mode
+    transparency is explicitly out of scope for #9 and will live
+    in a later issue if it's needed at all.
+  - Issue #11 (config:schema with Zod) will need to validate the
+    new ChorusConfig type independently of EscalationConfig.
+  - Issue #12 (per-request header override) gains
+    X-Turbocharger-Answer-Mode as a first-class header alongside
+    the existing X-Turbocharger-Mode idea.
+- **Related:** ADR-0020 (retained for the hard-fail policy on
+  chorus dispatch errors); ADR-0016 (escalation strategies share a
+  downstream — chorus is not bound by that because it's no longer
+  an escalation strategy); Issue #8 (where chorus was originally
+  scaffolded).
