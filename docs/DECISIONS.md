@@ -888,3 +888,80 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
   single downstream); ADR-0018 (maxDepth default is 2, which
   continues to be the recommended default for max-mode too despite
   max using at most one of those two available slots).
+
+## ADR-0020: Chorus dispatch is an OpenAI-compatible stub with hard-fail semantics
+
+- **Date:** 2026-04-22
+- **Status:** accepted
+- **Decision:** When `EscalationConfig.mode === 'chorus'`, the
+  pipeline performs exactly one HTTP POST to
+  `config.chorusEndpoint` with the client's original
+  chat/completions request body and the client's forwarded headers
+  (hop-by-hop stripped per RFC 7230), plus per-request context
+  headers under the `X-Turbocharger-*` namespace (decision reason,
+  aggregate score, ladder contents, etc). The endpoint is expected
+  to be OpenAI-compatible — that is, it accepts a standard chat-
+  completions request and returns a standard chat-completions
+  response. The dispatch is hard-fail: if the endpoint is unset,
+  unreachable, times out, or responds with a non-2xx status, the
+  pipeline surfaces a specific `stoppedReason`
+  (`chorus_endpoint_not_set`, `chorus_unreachable`,
+  `chorus_timeout`, `chorus_non_ok_status`) and returns the
+  original inadequate downstream response to the client. The
+  default timeout is 90 seconds (`DEFAULT_CHORUS_TIMEOUT_MS`),
+  overridable via `chorusTimeoutMs`. Chorus respects `maxDepth`:
+  `maxDepth === 0` disables it like any other mode.
+- **Rationale:** The chorus strategy is the multi-model consensus
+  strategy envisioned in the project brief, but the full
+  implementation (parallel dispatch, adequacy synthesis, minority
+  reports) is deliberately scoped to a separate project
+  (`openclaw-chorus`) rather than built into this sidecar. Issue #8
+  reserves the integration point without building the logic behind
+  it. The OpenAI-compatible protocol is the obvious choice: it
+  means a chorus server can be implemented as any OpenAI-
+  compatible HTTP service and swapped in without requiring a
+  non-standard request shape. Context via `X-Turbocharger-*`
+  headers lets the chorus server optionally make use of the
+  escalation reason and configured ladder without the client
+  having to pass them explicitly, while keeping the request body
+  a plain chat-completions payload. The hard-fail policy is a
+  deliberate deviation from the brief (§5, which suggested
+  "graceful fallback to max"): falling back silently would hide
+  configuration errors and make it hard to distinguish "chorus
+  was the strategy" from "chorus failed and max ran instead" in
+  the trace. Users who want a fallback can compose it at the
+  config layer (e.g. by retrying a failed chorus request with a
+  different mode) once the Zod-validated config loader arrives
+  in issue #11. The 90-second default reflects the realistic
+  runtime of chorus endpoints: parallel calls to ~3-5 models plus
+  a synthesis step routinely exceeds 45 seconds on sizeable
+  contexts, and a default that forces users to override on every
+  real deployment would be unhelpful. 90 seconds is generous
+  enough to let typical chorus implementations finish under
+  realistic conditions, while still bounding the worst case.
+- **Alternatives considered:**
+  - _Non-OpenAI-compatible dedicated chorus API._ Rejected:
+    locks the chorus server design into this project's
+    assumptions and forecloses reusing existing OpenAI-compatible
+    infrastructure.
+  - _Graceful fallback to max-mode on chorus failure._ Rejected
+    in favor of hard-fail because fallback hides configuration
+    errors and makes the trace misleading. Users who want
+    fallback can layer it on top via config composition, and the
+    decision is reversible: adding fallback later as an opt-in
+    flag is trivial, whereas removing silent fallback would be
+    a breaking change.
+  - _Baked-in default chorus endpoint (e.g. a hosted service)._
+    Rejected: assumes a business relationship we shouldn't make
+    on behalf of users.
+  - _Lower default timeout (30s or 60s)._ Rejected because
+    realistic chorus runtimes regularly exceed 60s under normal
+    conditions. A too-aggressive default would surface as
+    `chorus_timeout` errors for the common case, forcing every
+    deployment to override the default — which defeats the
+    purpose of a default.
+- **Related:** issue #8; ADR-0016 (escalation modes share the
+  downstream ProxyTarget — but chorus explicitly does not, since
+  it addresses a distinct endpoint); ADR-0019 (max-mode semantics
+  — same hard-fail pattern for `max_model_not_set`); brief §5
+  (original "graceful fallback" wording, revised here).
