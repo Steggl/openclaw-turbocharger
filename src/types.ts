@@ -439,10 +439,6 @@ export type ChorusDispatchResult =
     }
   | {
       readonly kind: 'error';
-      readonly reason:
-        | 'endpoint_not_set'
-        | 'unreachable'
-        | 'timeout'
-        | 'non_ok_status';
+      readonly reason: 'endpoint_not_set' | 'unreachable' | 'timeout' | 'non_ok_status';
       readonly detail: string;
     };
