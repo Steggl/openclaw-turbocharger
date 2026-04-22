@@ -305,45 +305,6 @@ describe('pipeline escalation (ladder)', () => {
     expect(mock.bodies()).toHaveLength(1);
   });
 
-  it('does not escalate when mode is chorus (not yet implemented in issue 6 or 7)', async () => {
-    await sidecar.close();
-    logs = [];
-    sidecar = startServer(
-      { port: 0, downstreamBaseUrl: mock.baseUrl },
-      {
-        logger: (entry) => {
-          logs.push(entry as DecisionLogEntry);
-        },
-        orchestratorConfig: makeOrchestratorConfig(),
-        escalationConfig: makeEscalationConfig({
-          mode: 'chorus',
-          chorusEndpoint: 'http://example.test/unused',
-        }),
-      },
-    );
-    sidecarBaseUrl = `http://127.0.0.1:${sidecar.port}`;
-
-    mock.setHandler((_req, res, _body) => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(buildChatCompletionBody("I'm sorry, I cannot help."));
-    });
-
-    const res = await fetch(`${sidecarBaseUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'weak-model',
-        messages: [{ role: 'user', content: 'help' }],
-      }),
-    });
-
-    expect(res.status).toBe(200);
-    expect(res.headers.get('x-turbocharger-decision')).toBe('escalate');
-    expect(res.headers.get('x-turbocharger-escalation-depth')).toBe('0');
-    expect(res.headers.get('x-turbocharger-escalation-stopped')).toBe('not_attempted');
-    expect(mock.bodies()).toHaveLength(1);
-  });
-
   it('maxDepth: 0 disables escalation entirely', async () => {
     await sidecar.close();
     logs = [];
