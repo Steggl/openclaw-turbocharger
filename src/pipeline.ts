@@ -1,41 +1,49 @@
-// Pipeline: forwards a chat/completions request via the proxy, runs the
-// orchestrator against the response body to produce an
-// {@link OrchestratorDecision}, and — when an escalation strategy is
-// configured (issue #6) — re-queries with the next model on the ladder
-// until either the response passes, the ladder is exhausted, or the
-// configured `maxDepth` is reached. Returns the (possibly annotated)
-// final response plus a trace of what happened; the caller (server.ts)
+// Pipeline: the sidecar's request processing path. Routes a client
+// request according to the configured {@link AnswerMode}:
+//
+//   - `single` (default): forwards to the configured {@link ProxyTarget},
+//     runs the orchestrator on the response, and — when an escalation
+//     strategy is configured (issue #6) — re-queries with the next model
+//     on the ladder until either the response passes, the ladder is
+//     exhausted, or `maxDepth` is reached. Issues #5, #6, #7.
+//   - `chorus` (per ADR-0021): forwards directly to the configured
+//     chorus endpoint, bypassing the proxy and the orchestrator. The
+//     chorus endpoint is expected to perform its own multi-model
+//     synthesis with bias transparency; re-running the adequacy
+//     critic on top would be double judgement.
+//
+// Returns the (possibly annotated) final response plus a trace of what
+// happened. For `single` mode the trace is an {@link EscalationTrace};
+// for `chorus` mode it's a {@link ChorusTrace}. The caller (server.ts)
 // emits headers and the log line.
 //
-// Scope (v0.1, issue #6):
+// Scope (v0.1):
 //   - Non-streamed `application/json` responses with 2xx status are
-//     evaluated. The body is buffered, the orchestrator runs against
-//     the assembled content, and — on an `escalate` decision — the
-//     pipeline re-sends the same request body with the next ladder
-//     model's id substituted into `model:`. Successive responses are
-//     re-evaluated by the orchestrator until a stopping condition is
-//     met (see EscalationTrace.stoppedReason).
-//   - Streamed responses (`stream: true` or `text/event-stream`) are
-//     skipped per ADR-0013. No orchestrator, no escalation.
+//     evaluated in `single` mode. Streamed responses (`stream: true`
+//     or `text/event-stream`) are skipped per ADR-0013.
 //   - Non-2xx responses and non-JSON bodies short-circuit the
 //     orchestrator and escalation alike.
+//   - `chorus` mode does not re-evaluate the chorus response; chorus
+//     IS the adequacy mechanism.
 //
 // Intentionally NOT in this file:
 //   - Body-level transparency (banner / card in response content) —
 //     issue #9. This file surfaces decisions via headers only.
-//   - The discarded original responses are not retained or surfaced to
-//     the client, per ADR-0017. Only the final attempted response
-//     reaches the client body.
-//   - Max-mode and chorus-mode escalation — the dispatch here treats
-//     `mode !== 'ladder'` as "no escalation" so that issues #7 and #8
-//     can plug in without reshaping this file.
+//   - Per ADR-0017 the discarded original responses in escalation
+//     loops are not retained or surfaced to the client.
+//   - Per-request AnswerMode override via X-Turbocharger-Answer-Mode
+//     header (issue #12). The pipeline takes answerMode as an
+//     argument; how the caller decides is the caller's concern.
 
 import { runOrchestrator } from './critic/orchestrator.js';
 import { nextLadderStep } from './escalation/ladder.js';
 import { maxStep } from './escalation/max.js';
-import { dispatchChorus } from './escalation/chorus.js';
+import { dispatchChorus } from './chorus/dispatch.js';
 import { forwardChatCompletion } from './proxy.js';
 import type {
+  AnswerMode,
+  ChorusConfig,
+  ChorusTrace,
   EscalationConfig,
   EscalationTrace,
   OrchestratorConfig,
@@ -159,16 +167,6 @@ function parseChatCompletionBody(json: unknown): ParsedResponse {
 // Escalation helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Build a Request object for a single escalation attempt: clone the
- * original request body, substitute the `model` field, and send it to
- * the same downstream. The resulting Request is passed to
- * {@link forwardChatCompletion} exactly like the original would be.
- *
- * All headers are preserved from the original Request so that
- * Authorization, Content-Type, and any client-supplied `X-*` headers
- * stay consistent across escalation steps.
- */
 function buildEscalationRequest(
   original: Request,
   body: Record<string, unknown>,
@@ -186,12 +184,13 @@ function buildEscalationRequest(
 // Header annotation
 // ---------------------------------------------------------------------------
 
-function annotateResponse(
+function annotateSingleResponse(
   response: Response,
   decision: OrchestratorDecision,
   trace: EscalationTrace,
 ): Response {
   const headers = new Headers(response.headers);
+  headers.set('x-turbocharger-answer-mode', 'single');
 
   switch (decision.kind) {
     case 'pass': {
@@ -226,9 +225,6 @@ function annotateResponse(
     }
   }
 
-  // Escalation trace is always emitted when a trace exists (even
-  // "not_attempted" for pass-first-try responses — makes client-side
-  // log parsing uniform).
   headers.set('x-turbocharger-escalation-depth', String(trace.depth));
   headers.set('x-turbocharger-escalation-stopped', trace.stoppedReason);
   if (trace.path.length > 0) {
@@ -242,27 +238,130 @@ function annotateResponse(
   });
 }
 
+function annotateChorusResponse(response: Response, trace: ChorusTrace): Response {
+  const headers = new Headers(response.headers);
+  headers.set('x-turbocharger-answer-mode', 'chorus');
+  headers.set('x-turbocharger-chorus-outcome', trace.outcome);
+  if (trace.detail !== undefined) {
+    headers.set('x-turbocharger-chorus-detail', trace.detail);
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
-export interface PipelineResult {
+export interface SinglePipelineResult {
+  readonly mode: 'single';
   readonly response: Response;
   readonly decision: OrchestratorDecision;
   readonly trace: EscalationTrace;
 }
 
+export interface ChorusPipelineResult {
+  readonly mode: 'chorus';
+  readonly response: Response;
+  readonly trace: ChorusTrace;
+}
+
+export type PipelineResult = SinglePipelineResult | ChorusPipelineResult;
+
+export interface PipelineInput {
+  readonly request: Request;
+  readonly target: ProxyTarget;
+  readonly orchestratorConfig: OrchestratorConfig;
+  readonly answerMode: AnswerMode;
+  readonly chorusConfig?: ChorusConfig;
+  readonly escalationConfig?: EscalationConfig;
+}
+
 /**
- * Run the full pipeline: forward the request, run the orchestrator on
- * the response, and — when configured — escalate up a ladder of models
- * until the response passes or a stopping condition is reached.
+ * Run the pipeline. Dispatches on `answerMode`: `single` goes through
+ * the proxy + orchestrator + optional escalation path, `chorus` goes
+ * directly to the chorus endpoint without orchestrator involvement.
  */
-export async function runPipeline(
-  request: Request,
-  target: ProxyTarget,
-  orchestratorConfig: OrchestratorConfig,
-  escalationConfig?: EscalationConfig,
-): Promise<PipelineResult> {
+export async function runPipeline(input: PipelineInput): Promise<PipelineResult> {
+  if (input.answerMode === 'chorus') {
+    return runChorusPipeline(input);
+  }
+  return runSinglePipeline(input);
+}
+
+async function runChorusPipeline(input: PipelineInput): Promise<ChorusPipelineResult> {
+  const { request, chorusConfig } = input;
+
+  if (chorusConfig === undefined) {
+    // AnswerMode was set to 'chorus' but no ChorusConfig was wired.
+    // Return a classified error response; the pipeline does not fall
+    // back to single-mode silently per ADR-0021's hard-fail policy.
+    const body = JSON.stringify({
+      error: {
+        type: 'chorus_endpoint_not_set',
+        message: 'chorus answer mode requires a ChorusConfig; none was provided',
+      },
+    });
+    const response = new Response(body, {
+      status: 503,
+      statusText: 'Service Unavailable',
+      headers: { 'content-type': 'application/json' },
+    });
+    const trace: ChorusTrace = {
+      outcome: 'endpoint_not_set',
+      detail: 'ChorusConfig missing on AppDeps',
+    };
+    return { mode: 'chorus', response: annotateChorusResponse(response, trace), trace };
+  }
+
+  // Read the raw body so we can forward it verbatim.
+  let bodyBytes = '{}';
+  try {
+    bodyBytes = await request.clone().text();
+  } catch {
+    // Leave the default; chorus will likely 4xx and we'll classify.
+  }
+
+  const dispatchResult = await dispatchChorus(chorusConfig, {
+    bodyBytes,
+    clientHeaders: request.headers,
+    contextHeaders: {},
+  });
+
+  if (dispatchResult.kind === 'ok') {
+    const trace: ChorusTrace = { outcome: 'ok' };
+    return {
+      mode: 'chorus',
+      response: annotateChorusResponse(dispatchResult.response, trace),
+      trace,
+    };
+  }
+
+  // Classified error. Return an error response with the trace.
+  const errorBody = JSON.stringify({
+    error: {
+      type: `chorus_${dispatchResult.reason}`,
+      message: dispatchResult.detail,
+    },
+  });
+  const status = dispatchResult.reason === 'timeout' ? 504 : 502;
+  const response = new Response(errorBody, {
+    status,
+    statusText: dispatchResult.reason === 'timeout' ? 'Gateway Timeout' : 'Bad Gateway',
+    headers: { 'content-type': 'application/json' },
+  });
+  const trace: ChorusTrace = {
+    outcome: dispatchResult.reason,
+    detail: dispatchResult.detail,
+  };
+  return { mode: 'chorus', response: annotateChorusResponse(response, trace), trace };
+}
+
+async function runSinglePipeline(input: PipelineInput): Promise<SinglePipelineResult> {
+  const { request, target, orchestratorConfig, escalationConfig } = input;
   const parsed = await parseClientRequest(request);
 
   // Short-circuit paths that bypass the orchestrator entirely.
@@ -274,7 +373,12 @@ export async function runPipeline(
       depth: 0,
     };
     const downstream = await forwardChatCompletion(request, target);
-    return { response: annotateResponse(downstream, decision, trace), decision, trace };
+    return {
+      mode: 'single',
+      response: annotateSingleResponse(downstream, decision, trace),
+      decision,
+      trace,
+    };
   }
 
   // First attempt: forward the original request.
@@ -291,7 +395,12 @@ export async function runPipeline(
       stoppedReason: 'not_attempted',
       depth: 0,
     };
-    return { response: annotateResponse(firstResponse, decision, trace), decision, trace };
+    return {
+      mode: 'single',
+      response: annotateSingleResponse(firstResponse, decision, trace),
+      decision,
+      trace,
+    };
   }
 
   const contentType = firstResponse.headers.get('content-type') ?? '';
@@ -306,7 +415,12 @@ export async function runPipeline(
       stoppedReason: 'not_attempted',
       depth: 0,
     };
-    return { response: annotateResponse(firstResponse, decision, trace), decision, trace };
+    return {
+      mode: 'single',
+      response: annotateSingleResponse(firstResponse, decision, trace),
+      decision,
+      trace,
+    };
   }
 
   // First response is a JSON body we can evaluate.
@@ -321,100 +435,16 @@ export async function runPipeline(
 
   const path: string[] = [];
   let depth = 0;
-  // Default stoppedReason is 'not_attempted', which is correct for
-  // every case where the escalation loop does not run at all: no
-  // escalation config, non-ladder mode, maxDepth === 0, or the very
-  // first orchestrator decision was escalate but the loop condition
-  // still prevents re-query. The up-front 'pass' check below promotes
-  // it to 'passed' when the first response was already adequate; every
-  // branch inside the loop that stops early explicitly sets its own
-  // final value.
   let stoppedReason: EscalationTrace['stoppedReason'] = 'not_attempted';
 
   if (currentDecision.kind === 'pass') {
     stoppedReason = 'passed';
   }
 
-  // Chorus dispatch (issue #8). Runs only when:
-  //   - the orchestrator decided `escalate`,
-  //   - an escalation config is provided,
-  //   - the mode is `chorus`,
-  //   - `maxDepth` is > 0 (keeps the kill switch uniform with ladder
-  //     and max; per ADR-0018 and ADR-0019 maxDepth=0 means "no
-  //     escalation for any mode").
-  //
-  // Unlike the ladder/max loop, chorus goes to a different HTTP
-  // endpoint (not the configured ProxyTarget) and its response is
-  // forwarded verbatim — no orchestrator re-evaluation. Per ADR-0020
-  // the dispatch is hard-fail: any error classifies the stop reason
-  // and the original inadequate response is returned to the client.
-  if (
-    currentDecision.kind === 'escalate' &&
-    escalationConfig !== undefined &&
-    escalationConfig.mode === 'chorus' &&
-    escalationConfig.maxDepth > 0
-  ) {
-    const chorusResult = await dispatchChorus(escalationConfig, {
-      bodyBytes: currentBodyText.length > 0 ? getOriginalRequestBody(parsed) : '{}',
-      clientHeaders: request.headers,
-      contextHeaders: buildChorusContextHeaders(currentDecision, escalationConfig),
-    });
-
-    if (chorusResult.kind === 'ok') {
-      const chorusBodyText = await chorusResult.response.text();
-      const chorusContentType = chorusResult.response.headers.get('content-type') ?? '';
-      if (chorusContentType.toLowerCase().includes('application/json')) {
-        // The chorus response is forwarded as-is. We re-run the
-        // orchestrator so the decision on the response is honest —
-        // but we do not act on an `escalate` decision here because
-        // chorus has no further step to take. The decision is
-        // reported via headers, the body is the chorus answer.
-        const chorusAssistant = parseChatCompletionBody(safeJsonParse(chorusBodyText));
-        const chorusDecision = await runOrchestrator(
-          buildOrchestratorInput(chorusAssistant, parsed),
-          orchestratorConfig,
-        );
-        currentDecision = chorusDecision;
-        currentBodyText = chorusBodyText;
-        currentResponse = chorusResult.response;
-        path.push('chorus');
-        depth = 1;
-        stoppedReason = chorusDecision.kind === 'pass' ? 'passed' : 'max_depth_reached';
-      } else {
-        // Chorus returned non-JSON. Forward the bytes as-is, record
-        // the stop reason, and keep the original decision (so the
-        // client still sees that escalation was attempted).
-        currentBodyText = chorusBodyText;
-        currentResponse = chorusResult.response;
-        path.push('chorus');
-        depth = 1;
-        stoppedReason = 'max_depth_reached';
-      }
-    } else {
-      // Classified chorus error. Keep the original (inadequate)
-      // response body for the client and record the specific stop
-      // reason for monitors and the transparency layer.
-      switch (chorusResult.reason) {
-        case 'endpoint_not_set':
-          stoppedReason = 'chorus_endpoint_not_set';
-          break;
-        case 'unreachable':
-          stoppedReason = 'chorus_unreachable';
-          break;
-        case 'timeout':
-          stoppedReason = 'chorus_timeout';
-          break;
-        case 'non_ok_status':
-          stoppedReason = 'chorus_non_ok_status';
-          break;
-      }
-    }
-  }
-
   // Escalation loop. Runs only when:
   //   - the orchestrator decided `escalate`,
   //   - an escalation config is provided,
-  //   - the mode is `ladder` or `max` (chorus falls through; issue #8),
+  //   - the mode is `ladder` or `max`,
   //   - `maxDepth` has not yet been spent,
   //   - a next target model can be resolved (strategy-specific).
   while (
@@ -437,9 +467,6 @@ export async function runPipeline(
     } else {
       next = nextLadderStep(currentModel, escalationConfig.ladder);
       if (next === null) {
-        // Current model isn't on the ladder, or we're at the top. Stop
-        // with an informative reason so monitors can distinguish the two
-        // off-ladder cases from actual ladder exhaustion.
         stoppedReason =
           escalationConfig.ladder.indexOf(currentModel) === -1
             ? 'model_not_on_ladder'
@@ -455,9 +482,6 @@ export async function runPipeline(
     const reQueryResponse = await forwardChatCompletion(reQueryRequest, target);
 
     if (!reQueryResponse.ok) {
-      // The re-query itself failed at the HTTP level. Stop the loop and
-      // hand the last failing response back so the client can see what
-      // happened. The decision stays `escalate`.
       currentResponse = reQueryResponse;
       currentBodyText = await reQueryResponse.text();
       stoppedReason = 'max_depth_reached';
@@ -466,8 +490,6 @@ export async function runPipeline(
 
     const reQueryContentType = reQueryResponse.headers.get('content-type') ?? '';
     if (!reQueryContentType.toLowerCase().includes('application/json')) {
-      // Similar handling: if the re-query returns non-JSON, stop and
-      // return that body unchanged.
       currentResponse = reQueryResponse;
       currentBodyText = await reQueryResponse.text();
       stoppedReason = 'max_depth_reached';
@@ -491,11 +513,6 @@ export async function runPipeline(
       stoppedReason = 'max_depth_reached';
       break;
     }
-    // Max mode does exactly one re-query per invocation: after the
-    // orchestrator evaluates the re-queried response, there is no
-    // further target to escalate to. If the decision is still
-    // `escalate`, we stop with max_depth_reached (semantically:
-    // "we used the one jump we had").
     if (escalationConfig.mode === 'max') {
       stoppedReason = 'max_depth_reached';
       break;
@@ -510,7 +527,8 @@ export async function runPipeline(
     headers: currentResponse.headers,
   });
   return {
-    response: annotateResponse(reconstituted, currentDecision, trace),
+    mode: 'single',
+    response: annotateSingleResponse(reconstituted, currentDecision, trace),
     decision: currentDecision,
     trace,
   };
@@ -534,47 +552,4 @@ function buildOrchestratorInput(
     ...(assistant.finishReason !== undefined ? { finishReason: assistant.finishReason } : {}),
     ...(parsed.locale !== undefined ? { locale: parsed.locale } : {}),
   };
-}
-
-/**
- * Serialise the client's original request body for forwarding to the
- * chorus endpoint. If parsing failed upstream (parsed.body is null),
- * fall back to an empty JSON object — the chorus server will return
- * a 4xx which we will classify as non_ok_status.
- */
-function getOriginalRequestBody(parsed: ParsedRequest): string {
-  if (parsed.body === null) return '{}';
-  return JSON.stringify(parsed.body);
-}
-
-/**
- * Build the per-request context headers the chorus endpoint receives
- * on top of the client's forwarded headers. Per ADR-0020 the chorus
- * protocol is OpenAI-compatible; the context is provided through
- * `X-Turbocharger-*` headers so a chorus server can optionally make
- * use of it without requiring a non-standard request body shape.
- */
-function buildChorusContextHeaders(
-  decision: OrchestratorDecision,
-  config: EscalationConfig,
-): Record<string, string> {
-  const headers: Record<string, string> = {};
-  if (decision.kind === 'escalate') {
-    headers['x-turbocharger-reason'] = decision.reason;
-    headers['x-turbocharger-aggregate'] = decision.aggregate.toFixed(3);
-    if (decision.signals.length > 0) {
-      headers['x-turbocharger-signals'] = decision.signals.map((s) => s.category).join(',');
-    }
-    if (decision.verdict !== undefined) {
-      headers['x-turbocharger-verdict'] = decision.verdict.verdict;
-      headers['x-turbocharger-verdict-confidence'] = decision.verdict.confidence.toFixed(3);
-    }
-  }
-  if (config.ladder.length > 0) {
-    headers['x-turbocharger-ladder'] = config.ladder.join(',');
-  }
-  if (config.maxModel !== undefined && config.maxModel.length > 0) {
-    headers['x-turbocharger-max-model'] = config.maxModel;
-  }
-  return headers;
 }

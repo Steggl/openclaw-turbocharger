@@ -324,11 +324,16 @@ export type Orchestrator = (
  * - `ladder`: step up a user-configured chain of model IDs one rung at a
  *   time. Issue #6.
  * - `max`: jump directly to a single configured maximum-performance
- *   model. Issue #7 (stub in #6).
- * - `chorus`: dispatch to an external chorus endpoint for multi-model
- *   consensus. Issue #8 (interface only; no implementation in v0.1).
+ *   model. Issue #7.
+ *
+ * Note: `chorus` used to be a third escalation mode (Issue #8) but was
+ * re-classified as a parallel {@link AnswerMode} per ADR-0021. Chorus
+ * is a deliberate user choice about how to shape the initial answer
+ * (multi-model consensus with bias transparency and minority reports),
+ * not a reactive fallback when adequacy fails. See {@link ChorusConfig}
+ * and {@link AnswerMode}.
  */
-export type EscalationMode = 'ladder' | 'max' | 'chorus';
+export type EscalationMode = 'ladder' | 'max';
 
 /**
  * Configuration for the escalation strategy. Per ADR-0016, the ladder is
@@ -358,24 +363,6 @@ export interface EscalationConfig {
    */
   readonly maxModel?: string;
   /**
-   * Optional chorus endpoint. Required when `mode === 'chorus'`;
-   * unused in other modes. Issue #8 makes this operational as an
-   * interface-only stub (see ADR-0020): the pipeline POSTs the
-   * original request to this URL and forwards the response as-is.
-   * Full chorus logic lives in the separate `openclaw-chorus`
-   * project and is not in scope here.
-   */
-  readonly chorusEndpoint?: string;
-  /**
-   * Optional per-request timeout for chorus dispatch, in
-   * milliseconds. Measured from the moment the sidecar sends the
-   * HTTP request to the moment the full response body has arrived.
-   * Applies only to `mode === 'chorus'`; ladder and max re-queries
-   * use the default client behaviour of {@link forwardChatCompletion}.
-   * When absent, {@link DEFAULT_CHORUS_TIMEOUT_MS} is used.
-   */
-  readonly chorusTimeoutMs?: number;
-  /**
    * Maximum number of escalation steps. `0` disables escalation
    * (decisions are reported but no re-query happens). `1` allows one
    * escalation and then freezes on whatever that produced. Per ADR-0018
@@ -401,10 +388,6 @@ export interface EscalationTrace {
     | 'ladder_exhausted'
     | 'model_not_on_ladder'
     | 'max_model_not_set'
-    | 'chorus_endpoint_not_set'
-    | 'chorus_unreachable'
-    | 'chorus_timeout'
-    | 'chorus_non_ok_status'
     | 'not_attempted';
   /** How many re-queries actually ran (0 when the first response passed). */
   readonly depth: number;
@@ -414,23 +397,70 @@ export interface EscalationTrace {
 // Chorus dispatch (issue #8, stub)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Answer mode and chorus (ADR-0021)
+// ---------------------------------------------------------------------------
+
+/**
+ * How the sidecar shapes the initial answer to a client request.
+ *
+ * - `single`: the default. The request goes to the configured
+ *   {@link ProxyTarget}, the orchestrator runs against the response,
+ *   and any `escalate` decision triggers the ladder/max escalation
+ *   loop per {@link EscalationConfig}.
+ * - `chorus`: a deliberate alternative paradigm. The request goes
+ *   directly to a configured chorus endpoint (per {@link ChorusConfig})
+ *   which internally consults multiple models and synthesises an
+ *   answer that exposes bias and minority reports. The orchestrator
+ *   does not run in this mode: the chorus response is forwarded
+ *   verbatim because chorus is itself a meta-adequacy mechanism.
+ *
+ * Per ADR-0021 this is a top-level request property, not an
+ * escalation strategy. The user chooses chorus because they want
+ * chorus-style output, not as a reaction to an inadequate first
+ * answer. Escalation (ladder/max) is orthogonal and only applies in
+ * `single` mode.
+ */
+export type AnswerMode = 'single' | 'chorus';
+
 /**
  * Default timeout for chorus dispatch, in milliseconds. See ADR-0020
- * for the rationale behind 90 seconds: chorus endpoints fan out to
- * several models in parallel and synthesise a combined answer, which
- * is substantially slower than a single model call. Callers can
- * override via {@link EscalationConfig.chorusTimeoutMs}.
+ * and ADR-0021 for the rationale behind 90 seconds: chorus endpoints
+ * fan out to several models in parallel and synthesise a combined
+ * answer, which is substantially slower than a single model call.
+ * Callers can override via {@link ChorusConfig.timeoutMs}.
  */
 export const DEFAULT_CHORUS_TIMEOUT_MS = 90_000;
 
 /**
+ * Configuration for chorus dispatch. Present in AppDeps when the
+ * deployment supports chorus mode. Per ADR-0021 this is separate
+ * from {@link EscalationConfig}: chorus is an answer mode, not an
+ * escalation strategy, and its lifecycle is independent.
+ */
+export interface ChorusConfig {
+  /**
+   * URL of the chorus endpoint. OpenAI-compatible: receives a
+   * standard chat/completions request body plus per-request context
+   * headers under the `X-Turbocharger-*` namespace.
+   */
+  readonly endpoint: string;
+  /**
+   * Optional per-request timeout in milliseconds. Measured from the
+   * moment the sidecar sends the HTTP request to the moment the
+   * full response body has arrived. When absent,
+   * {@link DEFAULT_CHORUS_TIMEOUT_MS} is used.
+   */
+  readonly timeoutMs?: number;
+}
+
+/**
  * Discriminated result of a chorus dispatch attempt.
  *
- * Per ADR-0020 the chorus dispatch is hard-fail: if the endpoint is
- * unset, unreachable, timed out, or returned a non-2xx status, the
- * pipeline does not fall back to another escalation strategy. It
- * returns the relevant `error` result and the pipeline's trace
- * records the corresponding `stoppedReason`.
+ * Per ADR-0020 (retained under ADR-0021) the chorus dispatch is
+ * hard-fail: a missing, unreachable, timing-out, or error-responding
+ * endpoint surfaces the specific `error` kind rather than silently
+ * falling back to a different strategy.
  */
 export type ChorusDispatchResult =
   | {
@@ -439,6 +469,23 @@ export type ChorusDispatchResult =
     }
   | {
       readonly kind: 'error';
-      readonly reason: 'endpoint_not_set' | 'unreachable' | 'timeout' | 'non_ok_status';
+      readonly reason:
+        | 'endpoint_not_set'
+        | 'unreachable'
+        | 'timeout'
+        | 'non_ok_status';
       readonly detail: string;
     };
+
+/**
+ * Chorus outcome attached to the per-request log line and surfaced
+ * via response headers when {@link AnswerMode} is `chorus`. Keeps
+ * the chorus audit trail separate from {@link EscalationTrace} so
+ * the two paradigms do not leak into each other's semantics.
+ */
+export interface ChorusTrace {
+  /** Whether the chorus dispatch produced a usable response. */
+  readonly outcome: 'ok' | 'endpoint_not_set' | 'unreachable' | 'timeout' | 'non_ok_status';
+  /** Human-readable detail for error outcomes. */
+  readonly detail?: string;
+}
