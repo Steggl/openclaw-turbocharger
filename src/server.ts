@@ -30,6 +30,7 @@ import type {
   ProxyTarget,
   RequestLogEntry,
   RequestLogger,
+  TransparencyConfig,
 } from './types.js';
 
 export interface AppDeps {
@@ -64,6 +65,19 @@ export interface AppDeps {
    * (issue #12). When absent, `single` is assumed.
    */
   readonly defaultAnswerMode?: AnswerMode;
+  /**
+   * Optional transparency configuration. When `mode: 'banner'`, the
+   * pipeline prepends a localized banner to the assistant content for
+   * single-mode requests where the orchestrator decided escalate or
+   * skipped-with-reason. When absent or `mode: 'silent'`, the
+   * response body is forwarded unchanged.
+   *
+   * IMPORTANT: the technical default is `silent`. To make escalation
+   * events visible to end users, operators MUST opt in by setting
+   * `mode: 'banner'`. See {@link TransparencyConfig} for the full
+   * rationale.
+   */
+  readonly transparencyConfig?: TransparencyConfig;
 }
 
 /**
@@ -81,6 +95,7 @@ export interface DecisionLogEntry extends RequestLogEntry {
   readonly escalation_path?: readonly string[];
   readonly chorus_outcome?: ChorusTrace['outcome'];
   readonly chorus_detail?: string;
+  readonly transparency_mode?: TransparencyConfig['mode'];
 }
 
 const defaultLogger: RequestLogger = (entry) => {
@@ -162,6 +177,9 @@ export function createApp(deps: AppDeps): Hono {
           ...(deps.escalationConfig !== undefined
             ? { escalationConfig: deps.escalationConfig }
             : {}),
+          ...(deps.transparencyConfig !== undefined
+            ? { transparencyConfig: deps.transparencyConfig }
+            : {}),
         });
         status = result.response.status;
         if (result.mode === 'single') {
@@ -209,6 +227,9 @@ export function createApp(deps: AppDeps): Hono {
         ...(escalationPath !== undefined ? { escalation_path: escalationPath } : {}),
         ...(chorusOutcome !== undefined ? { chorus_outcome: chorusOutcome } : {}),
         ...(chorusDetail !== undefined ? { chorus_detail: chorusDetail } : {}),
+        ...(deps.transparencyConfig !== undefined
+          ? { transparency_mode: deps.transparencyConfig.mode }
+          : {}),
       };
       log(entry);
     }
@@ -240,6 +261,9 @@ export function startServer(
     ...(deps?.escalationConfig !== undefined ? { escalationConfig: deps.escalationConfig } : {}),
     ...(deps?.chorusConfig !== undefined ? { chorusConfig: deps.chorusConfig } : {}),
     ...(deps?.defaultAnswerMode !== undefined ? { defaultAnswerMode: deps.defaultAnswerMode } : {}),
+    ...(deps?.transparencyConfig !== undefined
+      ? { transparencyConfig: deps.transparencyConfig }
+      : {}),
   });
 
   const server = serve({

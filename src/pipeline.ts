@@ -40,6 +40,7 @@ import { nextLadderStep } from './escalation/ladder.js';
 import { maxStep } from './escalation/max.js';
 import { dispatchChorus } from './chorus/dispatch.js';
 import { forwardChatCompletion } from './proxy.js';
+import { formatBannerPrefix } from './transparency/banner.js';
 import type {
   AnswerMode,
   ChorusConfig,
@@ -49,6 +50,7 @@ import type {
   OrchestratorConfig,
   OrchestratorDecision,
   ProxyTarget,
+  TransparencyConfig,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -278,6 +280,16 @@ export interface PipelineInput {
   readonly answerMode: AnswerMode;
   readonly chorusConfig?: ChorusConfig;
   readonly escalationConfig?: EscalationConfig;
+  /**
+   * Optional transparency configuration. When `mode: 'banner'`, the
+   * pipeline prepends a localized banner to the assistant content for
+   * single-mode requests where the orchestrator decided escalate or
+   * skipped-with-reason. When absent or `mode: 'silent'`, the
+   * response body is forwarded unchanged. Per Issue #9 and ADR-0022,
+   * chorus-mode responses are never modified by the transparency
+   * layer regardless of this setting.
+   */
+  readonly transparencyConfig?: TransparencyConfig;
 }
 
 /**
@@ -521,6 +533,19 @@ async function runSinglePipeline(input: PipelineInput): Promise<SinglePipelineRe
 
   const trace: EscalationTrace = { path, stoppedReason, depth };
 
+  // Transparency banner injection (Issue #9). Only runs when:
+  //   - transparencyConfig.mode === 'banner' (default is silent),
+  //   - the response body is JSON (we already established this above),
+  //   - formatBannerPrefix returns non-null (i.e. not a pass decision).
+  // The original currentBodyText is replaced with one whose
+  // choices[0].message.content has the banner prepended.
+  if (input.transparencyConfig?.mode === 'banner') {
+    const banner = formatBannerPrefix(currentDecision, trace, parsed.locale);
+    if (banner !== null) {
+      currentBodyText = injectBannerIntoBody(currentBodyText, banner);
+    }
+  }
+
   const reconstituted = new Response(currentBodyText, {
     status: currentResponse.status,
     statusText: currentResponse.statusText,
@@ -552,4 +577,46 @@ function buildOrchestratorInput(
     ...(assistant.finishReason !== undefined ? { finishReason: assistant.finishReason } : {}),
     ...(parsed.locale !== undefined ? { locale: parsed.locale } : {}),
   };
+}
+
+/**
+ * Prepend the transparency banner to `choices[0].message.content` of
+ * an OpenAI-compatible chat completion JSON body. Returns the modified
+ * body as a string.
+ *
+ * If the body is malformed JSON or the choices array is missing, the
+ * banner cannot be safely injected and the original body is returned
+ * unchanged. The pipeline has already established earlier that the
+ * downstream content-type is `application/json` and the orchestrator
+ * could parse the response, so a malformed body here would be unusual,
+ * but the defensive fallback keeps a transparency misconfiguration from
+ * corrupting the client's response.
+ */
+function injectBannerIntoBody(bodyText: string, bannerPrefix: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return bodyText;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return bodyText;
+  const obj = parsed as Record<string, unknown>;
+  const choices = obj['choices'];
+  if (!Array.isArray(choices) || choices.length === 0) return bodyText;
+  const firstChoice = choices[0];
+  if (typeof firstChoice !== 'object' || firstChoice === null) return bodyText;
+  const choiceObj = firstChoice as Record<string, unknown>;
+  const message = choiceObj['message'];
+  if (typeof message !== 'object' || message === null) return bodyText;
+  const messageObj = message as Record<string, unknown>;
+  const content = messageObj['content'];
+  // Only string content is supported; structured array content is left
+  // alone because banner placement inside an array of content parts is
+  // ambiguous and not in scope for v0.1.
+  if (typeof content !== 'string') return bodyText;
+  const newMessage = { ...messageObj, content: bannerPrefix + content };
+  const newChoice = { ...choiceObj, message: newMessage };
+  const newChoices = [newChoice, ...choices.slice(1)];
+  const newBody = { ...obj, choices: newChoices };
+  return JSON.stringify(newBody);
 }
