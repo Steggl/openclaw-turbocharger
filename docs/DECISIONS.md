@@ -1070,3 +1070,140 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
   downstream — chorus is not bound by that because it's no longer
   an escalation strategy); Issue #8 (where chorus was originally
   scaffolded).
+
+## ADR-0022: Transparency banner is opt-in, body-mutating, locale-aware
+
+- **Date:** 2026-04-23
+- **Status:** accepted, implements brief §7
+- **Decision:** The transparency layer (Issue #9) ships with one
+  active mode — `banner` — and one default — `silent`. The default
+  is silent: a sidecar started without an explicit
+  `transparencyConfig` will not modify any response body, even when
+  escalation happens. Operators who want end users to see a banner
+  must opt in by setting `transparencyConfig: { mode: 'banner' }`
+  on AppDeps. When opted in, every escalation/skipped-with-reason
+  decision in single-mode requests produces a single-line banner
+  prepended to the assistant content with the marker
+  `[turbocharger]` and a blank line separator. Banners are
+  locale-aware (English default, German for `de*` locales) and
+  deliberately vague in tone ("looked incomplete", not "was
+  wrong"). Pass decisions never produce a banner. Chorus-mode
+  responses are out of scope and never touched.
+- **Rationale:** Three decisions are bundled into one ADR because
+  they share the same underlying principle: the transparency layer
+  trades response-body invasiveness for end-user visibility, and
+  every aspect of that trade-off needs to default to caution.
+  - _Silent default._ The brief §7 says "banner-as-default" for
+    the user-facing vision, but that's the default a deployment
+    should *aim for*, not the default a constructor should pick
+    for a misconfigured deployment. A sidecar starting without
+    explicit config landing on a Hono app and silently mutating
+    every response with `[turbocharger]` text would surprise
+    operators in ways the project's "no silent fallbacks" stance
+    does not allow. Silent-as-technical-default lets the brief's
+    user-facing default live in `examples/standalone-config.example.yaml`
+    and the README, where operators see and accept it
+    consciously, rather than as a hidden constructor behaviour.
+    Because of this asymmetry between technical default and
+    recommended default, the README, CONFIGURATION.md, and the
+    JSDoc on `TransparencyConfig` all explicitly tell operators
+    they MUST set `mode: 'banner'` to surface escalation events
+    — silent is "do nothing visible", not "the recommended
+    user experience".
+  - _Body-mutating, not header-only._ Headers (`x-turbocharger-*`)
+    already exist for the same information and have done since
+    Issue #5. The brief's transparency goal is end-user-visible
+    output, not API metadata, and end users do not see HTTP
+    headers — they see assistant message content. Banner injection
+    therefore mutates `choices[0].message.content`. This is
+    invasive but it is the only way to actually meet the brief's
+    goal. The marker `[turbocharger]` plus blank-line separator
+    keeps the injection unambiguously machine-strippable for
+    clients that prefer the headers-only view.
+  - _Tone is vague, not technical._ "The first answer looked
+    incomplete" instead of "A refusal pattern was detected". The
+    project's "do not overclaim" principle (brief §14, item 7)
+    rules out language that asserts the original answer was
+    objectively wrong; the adequacy critic detected a flag, not
+    a proven inadequacy. Vague language also avoids leaking
+    implementation details about specific signal categories,
+    which is good for forward-compatibility (Issue #11+ may add,
+    rename, or remove categories) and good for the user
+    (knowing the category is rarely what they need; knowing
+    "the system noticed something off and tried again" is).
+  - _Locale-aware (en + de only)._ Two locales is enough for v0.1
+    given the project's EU/DACH-friendly positioning. The
+    BCP-47 prefix-match (`de-AT` → `de`) keeps the resolver
+    simple. Other locales fall through to English. Issue #11's
+    config schema can later allow operators to add their own
+    locale tables without changing the banner module's API.
+- **Alternatives considered:**
+  - _Banner-as-default, opt-out via silent._ Considered: align
+    technical default with the brief's user-facing recommendation.
+    Rejected because the failure mode of "default mutates response
+    bodies" is much worse than "default is silent": a
+    misconfigured client could end up with `[turbocharger]`
+    prefixes in stored conversation logs, and the operator might
+    not notice for days. Silent-as-default fails closed.
+  - _Header-only transparency, no body mutation._ Considered:
+    keep transparency entirely in `x-turbocharger-*` headers,
+    skip body mutation. Rejected because the brief's goal is
+    end-user visibility, and end users do not read response
+    headers. Header-only transparency would meet the API
+    requirements but not the user-facing requirement.
+  - _Per-decision verbosity (banner vs card vs silent toggleable
+    per request)._ Considered: let clients pick the mode via
+    `X-Turbocharger-Transparency` header. Rejected for v0.1: it
+    conflates two issues. Issue #9 is about the banner; Issue
+    #10 is about the card; Issue #12 is about per-request
+    overrides. Bundling them all into one PR would make each
+    harder to review.
+  - _Render banner at the END of the content instead of the
+    beginning._ Considered: less visually invasive when reading
+    streaming output, more readable in chat UIs that auto-scroll
+    to bottom. Rejected because (a) streaming is out of scope
+    per ADR-0013 — this layer never sees streamed responses,
+    (b) appending after content makes it easy for the user to
+    miss the banner if the response is long, and (c) the
+    pipeline already has the response body buffered, so prefix
+    placement is not harder than suffix placement.
+- **Mechanical scope of Issue #9:**
+  - New `TransparencyConfig` type with single field `mode:
+    'banner' | 'silent'`. Issue #10 will add `'card'`.
+  - `src/transparency/banner.ts` becomes a real module
+    (replacing the Issue #1 stub) exporting `formatBanner`,
+    `formatBannerPrefix`, and `resolveBannerLocale`.
+  - `PipelineInput` gains optional `transparencyConfig`.
+  - Pipeline calls `formatBannerPrefix` after the escalation
+    loop, before constructing the final Response. Banner
+    injection mutates a parsed copy of `currentBodyText` and
+    re-stringifies it; if parsing fails or the body shape is
+    unexpected, the original body is preserved (defensive
+    fallback so a misconfiguration cannot corrupt responses).
+  - `AppDeps` gains optional `transparencyConfig` which the
+    server passes through to the pipeline.
+  - `DecisionLogEntry` gains optional `transparency_mode` so
+    log aggregators can correlate body-mutation behaviour
+    without re-parsing response bodies.
+  - Two test files: `test/banner.test.ts` (24 unit tests for
+    `formatBanner` + `resolveBannerLocale`) and
+    `test/pipeline-banner.test.ts` (6 integration tests
+    covering banner-on-escalate, no-banner-on-pass,
+    silent-mode, default-silent, not_attempted, and German
+    locale).
+- **Consequences for downstream issues:**
+  - Issue #10 (transparency: card) extends `TransparencyConfig.mode`
+    to a third literal `'card'` and adds card-rendering to the
+    same injection path.
+  - Issue #11 (config:schema) needs to validate
+    `TransparencyConfig` and to expose `mode: 'banner'` as the
+    *recommended* default in `examples/standalone-config.example.yaml`.
+  - Issue #12 (per-request header override) gains
+    `X-Turbocharger-Transparency: banner|silent|card` as an
+    optional override on top of the configured default.
+  - The README's positioning section can now show concrete
+    banner output as a screenshot or code block.
+- **Related:** ADR-0007 (transparency-as-design-principle),
+  ADR-0013 (no transparency for streaming responses),
+  ADR-0021 (chorus-mode is out of transparency layer scope),
+  brief §7 and §14.
