@@ -183,11 +183,7 @@ describe('formatBanner — skipped decisions', () => {
 
 describe('formatBannerPrefix', () => {
   it('appends a blank line separator after the banner text', () => {
-    const prefix = formatBannerPrefix(
-      ESCALATE_DECISION,
-      trace('passed', 1, ['mid-model']),
-      'en',
-    );
+    const prefix = formatBannerPrefix(ESCALATE_DECISION, trace('passed', 1, ['mid-model']), 'en');
     expect(prefix).not.toBeNull();
     expect(prefix!.endsWith('\n\n')).toBe(true);
   });

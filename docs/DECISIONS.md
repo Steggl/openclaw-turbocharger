@@ -1095,7 +1095,7 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
   every aspect of that trade-off needs to default to caution.
   - _Silent default._ The brief §7 says "banner-as-default" for
     the user-facing vision, but that's the default a deployment
-    should *aim for*, not the default a constructor should pick
+    should _aim for_, not the default a constructor should pick
     for a misconfigured deployment. A sidecar starting without
     explicit config landing on a Hono app and silently mutating
     every response with `[turbocharger]` text would surprise
@@ -1169,7 +1169,7 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
     placement is not harder than suffix placement.
 - **Mechanical scope of Issue #9:**
   - New `TransparencyConfig` type with single field `mode:
-    'banner' | 'silent'`. Issue #10 will add `'card'`.
+'banner' | 'silent'`. Issue #10 will add `'card'`.
   - `src/transparency/banner.ts` becomes a real module
     (replacing the Issue #1 stub) exporting `formatBanner`,
     `formatBannerPrefix`, and `resolveBannerLocale`.
@@ -1197,7 +1197,7 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
     same injection path.
   - Issue #11 (config:schema) needs to validate
     `TransparencyConfig` and to expose `mode: 'banner'` as the
-    *recommended* default in `examples/standalone-config.example.yaml`.
+    _recommended_ default in `examples/standalone-config.example.yaml`.
   - Issue #12 (per-request header override) gains
     `X-Turbocharger-Transparency: banner|silent|card` as an
     optional override on top of the configured default.
