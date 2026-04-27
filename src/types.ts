@@ -485,3 +485,35 @@ export interface ChorusTrace {
   /** Human-readable detail for error outcomes. */
   readonly detail?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Transparency layer (Issue #9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Configuration for the transparency layer that surfaces escalation
+ * decisions to the end user via the response body.
+ *
+ * - `silent` (default): no body modification. Decisions are still
+ *   reported via response headers (`x-turbocharger-*`) and the
+ *   per-request log line, but the assistant content is unchanged.
+ * - `banner`: a single-line localized message marked with
+ *   `[turbocharger]` is prepended to the assistant's content,
+ *   followed by a blank line, when an escalation decision was
+ *   made (escalate or skipped-with-reason). No banner is emitted
+ *   for `pass` decisions.
+ *
+ * IMPORTANT: the technical default is `silent`. A sidecar that
+ * starts without an explicit `transparencyConfig` will never mutate
+ * response bodies. To make escalation events visible to end users,
+ * operators MUST opt in by setting `mode: 'banner'`. This is a
+ * deliberate choice: response-body mutation is invasive and should
+ * only happen when the operator has consciously chosen it.
+ *
+ * Issue #10 will add `mode: 'card'` for a structured JSON-in-content
+ * surface as a third option. Chorus-mode responses are out of scope
+ * for the transparency layer per ADR-0021.
+ */
+export interface TransparencyConfig {
+  readonly mode: 'banner' | 'silent';
+}
