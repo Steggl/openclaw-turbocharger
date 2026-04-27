@@ -15,7 +15,7 @@ gets one answer from the model the router judged appropriate.
 
 `openclaw-turbocharger` is **reactive**: it forwards the request to
 the model the user (or an upstream router) chose, evaluates the
-*response*, and only then decides whether a stronger model should be
+_response_, and only then decides whether a stronger model should be
 tried. The two approaches answer different questions:
 
 - _Predictive:_ "given this query, which model should run it?"
@@ -39,13 +39,13 @@ The columns below cover the differentiating axes for the OpenClaw
 router space in early 2026. "Yes/No" judgements are based on each
 project's published documentation; corrections welcome via PR.
 
-| Project                          | Approach           | Multi-model consensus | EU-compatible | Crypto / wallet dependency | License |
-| -------------------------------- | ------------------ | --------------------- | ------------- | -------------------------- | ------- |
-| `openclaw-turbocharger`          | Reactive escalation + chorus answer mode | Yes (chorus mode) | Yes           | No                         | MIT     |
-| ClawRouter (BlockRunAI)          | Predictive (cascade on roadmap) | No        | Limited       | Yes                        | MIT     |
-| iblai-openclaw-router (ibl.ai)   | Predictive (14-dimension)       | No        | Yes           | No                         | MIT     |
-| openmark-router (OpenMark AI)    | Predictive (benchmark-driven)   | No        | Yes           | No                         | MIT     |
-| openrouter/auto                  | Predictive (proprietary)        | No        | Yes           | No                         | Closed  |
+| Project                        | Approach                                 | Multi-model consensus | EU-compatible | Crypto / wallet dependency | License |
+| ------------------------------ | ---------------------------------------- | --------------------- | ------------- | -------------------------- | ------- |
+| `openclaw-turbocharger`        | Reactive escalation + chorus answer mode | Yes (chorus mode)     | Yes           | No                         | MIT     |
+| ClawRouter (BlockRunAI)        | Predictive (cascade on roadmap)          | No                    | Limited       | Yes                        | MIT     |
+| iblai-openclaw-router (ibl.ai) | Predictive (14-dimension)                | No                    | Yes           | No                         | MIT     |
+| openmark-router (OpenMark AI)  | Predictive (benchmark-driven)            | No                    | Yes           | No                         | MIT     |
+| openrouter/auto                | Predictive (proprietary)                 | No                    | Yes           | No                         | Closed  |
 
 "EU-compatible" here means the project does not require integration
 with crypto-payment flows or token-based payment rails that conflict

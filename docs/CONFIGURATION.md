@@ -37,11 +37,11 @@ The breakdown below matches that order.
 
 The minimum viable configuration. Every deployment needs this.
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `port` | `number` | Yes | TCP port the sidecar listens on. |
-| `downstreamBaseUrl` | `string` | Yes | OpenAI-compatible base URL. Trailing slashes are normalised away. |
-| `downstreamApiKey` | `string` | No | Bearer token injected as `Authorization: Bearer <key>` when the upstream client did not supply one. |
+| Field               | Type     | Required | Description                                                                                         |
+| ------------------- | -------- | -------- | --------------------------------------------------------------------------------------------------- |
+| `port`              | `number` | Yes      | TCP port the sidecar listens on.                                                                    |
+| `downstreamBaseUrl` | `string` | Yes      | OpenAI-compatible base URL. Trailing slashes are normalised away.                                   |
+| `downstreamApiKey`  | `string` | No       | Bearer token injected as `Authorization: Bearer <key>` when the upstream client did not supply one. |
 
 Examples of `downstreamBaseUrl`:
 `http://localhost:11434/v1` (Ollama),
@@ -74,12 +74,12 @@ Tunes the adequacy critic. Required for single-mode requests when
 the orchestrator should run; absent means pass-through proxy
 behaviour.
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `threshold` | `number` | — | Escalation threshold for the noisy-OR aggregate (`[0, 1]`). ADR-0006 recommends `0.6`. |
-| `weights` | `SignalWeights` | — | Per-category multiplier applied to each signal's confidence before aggregation. |
-| `greyBand` | `[number, number]` | `[0.30, 0.60]` (recommended) | Range in which the LLM-critic is invoked, when configured. ADR-0010. |
-| `llmCritic` | `{ run, config }` | absent | Optional LLM-critic. When present, runs only inside the grey band. |
+| Field       | Type               | Default                      | Description                                                                            |
+| ----------- | ------------------ | ---------------------------- | -------------------------------------------------------------------------------------- |
+| `threshold` | `number`           | —                            | Escalation threshold for the noisy-OR aggregate (`[0, 1]`). ADR-0006 recommends `0.6`. |
+| `weights`   | `SignalWeights`    | —                            | Per-category multiplier applied to each signal's confidence before aggregation.        |
+| `greyBand`  | `[number, number]` | `[0.30, 0.60]` (recommended) | Range in which the LLM-critic is invoked, when configured. ADR-0010.                   |
+| `llmCritic` | `{ run, config }`  | absent                       | Optional LLM-critic. When present, runs only inside the grey band.                     |
 
 `SignalWeights` covers six categories: `refusal`, `truncation`,
 `repetition`, `empty`, `tool_error`, `syntax_error`. A weight of
@@ -91,12 +91,12 @@ at `1.0` and tuning per workload.
 Tells the pipeline what to do when the orchestrator decides
 `escalate`. Only consulted in `single` answer mode.
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `mode` | `'ladder' \| 'max'` | Yes | Strategy. ADR-0021 reduced this from three to two — chorus is no longer an escalation strategy. |
-| `ladder` | `string[]` | Yes (use `[]` for max-only) | Ordered weak-to-strong list of model ids understood by the downstream target. |
-| `maxModel` | `string` | Required when `mode === 'max'` | Single jump target. Per ADR-0019 there is no implicit fallback; missing `maxModel` in max mode produces a `max_model_not_set` stop. |
-| `maxDepth` | `number` | Yes | Maximum escalation steps. `0` disables escalation entirely (decisions still reported via headers). ADR-0018 recommends `2`. |
+| Field      | Type                | Required                       | Description                                                                                                                         |
+| ---------- | ------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`     | `'ladder' \| 'max'` | Yes                            | Strategy. ADR-0021 reduced this from three to two — chorus is no longer an escalation strategy.                                     |
+| `ladder`   | `string[]`          | Yes (use `[]` for max-only)    | Ordered weak-to-strong list of model ids understood by the downstream target.                                                       |
+| `maxModel` | `string`            | Required when `mode === 'max'` | Single jump target. Per ADR-0019 there is no implicit fallback; missing `maxModel` in max mode produces a `max_model_not_set` stop. |
+| `maxDepth` | `number`            | Yes                            | Maximum escalation steps. `0` disables escalation entirely (decisions still reported via headers). ADR-0018 recommends `2`.         |
 
 Per ADR-0016 all ladder steps share the single configured downstream
 target — there are no per-model `baseUrl` overrides in v0.1.
@@ -108,9 +108,9 @@ Configures chorus dispatch. Required when `defaultAnswerMode` is
 `EscalationConfig` because chorus is an answer paradigm, not an
 escalation strategy.
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `endpoint` | `string` | Yes | URL of the chorus endpoint. OpenAI-compatible: receives a standard chat/completions request body plus `X-Turbocharger-*` context headers. |
+| Field       | Type     | Required              | Description                                                                                                                                         |
+| ----------- | -------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `endpoint`  | `string` | Yes                   | URL of the chorus endpoint. OpenAI-compatible: receives a standard chat/completions request body plus `X-Turbocharger-*` context headers.           |
 | `timeoutMs` | `number` | No (default `90_000`) | Per-request timeout. Chorus endpoints are slower than single-model calls because they fan out internally; ADR-0020 documents the 90-second default. |
 
 Per ADR-0020 (retained under ADR-0021), chorus dispatch is
@@ -126,8 +126,8 @@ body to end users. Decisions are always reported as
 `x-turbocharger-*` response headers and structured log fields
 regardless of this setting.
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
+| Field  | Type                   | Required                                | Description                                                        |
+| ------ | ---------------------- | --------------------------------------- | ------------------------------------------------------------------ |
 | `mode` | `'banner' \| 'silent'` | Yes when transparencyConfig is supplied | Body-level display mode. The `'card'` mode arrives with issue #10. |
 
 **The technical default is silent.** Per [ADR-0022](./DECISIONS.md), a
@@ -151,11 +151,11 @@ For deployments that don't yet use the file-based config (most
 of them, since #11 hasn't landed), `loadEnvConfig` reads the
 following:
 
-| Variable | Type | Required | Maps to |
-| --- | --- | --- | --- |
-| `TURBOCHARGER_PORT` | number | No (default `11435`) | `AppConfig.port` |
-| `TURBOCHARGER_DOWNSTREAM_BASE_URL` | string | Yes | `AppConfig.downstreamBaseUrl` |
-| `TURBOCHARGER_DOWNSTREAM_API_KEY` | string | No | `AppConfig.downstreamApiKey` |
+| Variable                           | Type   | Required             | Maps to                       |
+| ---------------------------------- | ------ | -------------------- | ----------------------------- |
+| `TURBOCHARGER_PORT`                | number | No (default `11435`) | `AppConfig.port`              |
+| `TURBOCHARGER_DOWNSTREAM_BASE_URL` | string | Yes                  | `AppConfig.downstreamBaseUrl` |
+| `TURBOCHARGER_DOWNSTREAM_API_KEY`  | string | No                   | `AppConfig.downstreamApiKey`  |
 
 Other config objects (orchestrator, escalation, chorus,
 transparency) are wired in code via `AppDeps` for now. The full
