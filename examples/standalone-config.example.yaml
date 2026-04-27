@@ -1,39 +1,70 @@
 # openclaw-turbocharger — standalone config example
 #
-# Status: ILLUSTRATIVE. This example mirrors the shape in PROJECT_BRIEF.md §5
-# but is not yet validated against a live schema (schema lands with issue #11).
-# Keys and types may still change before v0.1.0-alpha.
+# Status: ILLUSTRATIVE. This example mirrors the type surface in
+# src/types.ts but is not yet validated against a live schema (schema
+# lands with issue #11). Keys and types may still change before
+# v0.1.0-alpha. See docs/CONFIGURATION.md for the field-by-field
+# reference.
 
 turbocharger:
-  # Which escalation strategy fires on critic-fail.
-  # ladder | max | chorus
-  default_escalation: ladder
+  port: 11435
+  downstream_base_url: http://localhost:11434/v1
 
-  # Ordered chain used by the `ladder` strategy. Each step is a model id
-  # the downstream target understands.
-  ladder:
-    - ollama/qwen2.5:7b
-    - anthropic/claude-haiku-4-5
-    - anthropic/claude-sonnet-4-6
-    - anthropic/claude-opus-4-7
+  # Top-level paradigm: 'single' (default) for reactive escalation, or
+  # 'chorus' for direct dispatch to a multi-model consensus endpoint.
+  # Per ADR-0021 these are orthogonal answer modes, not stages of the
+  # same process.
+  answer_mode: single
 
-  # Target used by the `max` strategy (single jump).
-  max_model: anthropic/claude-opus-4-7
+  # Adequacy critic (single mode). Skipped entirely in chorus mode.
+  orchestrator:
+    threshold: 0.6
+    grey_band: [0.30, 0.60]
+    weights:
+      refusal: 1.0
+      truncation: 1.0
+      repetition: 1.0
+      empty: 1.0
+      tool_error: 1.0
+      syntax_error: 1.0
+    llm_critic:
+      base_url: http://localhost:11434/v1
+      model: qwen2.5:7b
+      budget_usd: 0.01
 
-  # Set when openclaw-chorus is available. Null → chorus mode falls back to `max`.
-  chorus_endpoint: null
+  # Escalation strategy (single mode + escalate decision). Per
+  # ADR-0021, chorus is no longer an escalation mode — it lives
+  # under its own top-level 'chorus' section below.
+  escalation:
+    # ladder | max
+    mode: ladder
 
-  # Maximum consecutive escalations per request (prevents runaway costs).
-  max_escalation_depth: 2
+    # Ordered chain used by the 'ladder' strategy. Each step is a
+    # model id the downstream target understands.
+    ladder:
+      - ollama/qwen2.5:7b
+      - anthropic/claude-haiku-4-5
+      - anthropic/claude-sonnet-4-6
+      - anthropic/claude-opus-4-7
 
-  critic:
-    # hard_only | hybrid | llm_only
-    strategy: hybrid
-    # Model used by the LLM-critic when strategy is hybrid or llm_only.
-    llm_model: ollama/qwen2.5:7b
-    # Cost ceiling per request for the LLM-critic. Exceeded → hard-signal-only.
-    critic_budget_usd: 0.01
+    # Target used by the 'max' strategy (single jump). Required
+    # when mode is 'max'; ignored in 'ladder' mode.
+    max_model: anthropic/claude-opus-4-7
 
+    # Maximum consecutive escalations per request (prevents runaway
+    # costs). Per ADR-0018, 2 is the recommended default.
+    max_depth: 2
+
+  # Chorus configuration (chorus mode only). Active when
+  # answer_mode is 'chorus'; ignored otherwise. Per ADR-0020 the
+  # dispatch is hard-fail — no silent fallback to single mode.
+  chorus:
+    endpoint: null # set to a chorus endpoint URL, e.g. openclaw-chorus
+    timeout_ms: 90000
+
+  # Transparency layer. The technical default is silent — set
+  # mode: banner below to opt in to user-visible escalation
+  # annotations. See ADR-0022.
   transparency:
-    # banner | silent | card
-    default: banner
+    # banner | silent (card lands with issue #10)
+    mode: banner

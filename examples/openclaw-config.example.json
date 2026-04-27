@@ -1,23 +1,43 @@
 {
-  "_note": "ILLUSTRATIVE example config — JSON variant of examples/standalone-config.example.yaml. Not yet validated against a live schema (schema lands with issue #11). Keys and types may change before v0.1.0-alpha.",
+  "_note": "ILLUSTRATIVE example config — JSON variant of examples/standalone-config.example.yaml. Mirrors the type surface in src/types.ts but is not yet validated against a live schema (schema lands with issue #11). See docs/CONFIGURATION.md for the field-by-field reference. Transparency mode is set to 'banner' here to demonstrate the opt-in deployment shape; the technical default is 'silent'.",
   "turbocharger": {
-    "default_escalation": "ladder",
-    "ladder": [
-      "ollama/qwen2.5:7b",
-      "anthropic/claude-haiku-4-5",
-      "anthropic/claude-sonnet-4-6",
-      "anthropic/claude-opus-4-7"
-    ],
-    "max_model": "anthropic/claude-opus-4-7",
-    "chorus_endpoint": null,
-    "max_escalation_depth": 2,
-    "critic": {
-      "strategy": "hybrid",
-      "llm_model": "ollama/qwen2.5:7b",
-      "critic_budget_usd": 0.01
+    "port": 11435,
+    "downstream_base_url": "http://localhost:11434/v1",
+    "answer_mode": "single",
+    "orchestrator": {
+      "threshold": 0.6,
+      "grey_band": [0.3, 0.6],
+      "weights": {
+        "refusal": 1.0,
+        "truncation": 1.0,
+        "repetition": 1.0,
+        "empty": 1.0,
+        "tool_error": 1.0,
+        "syntax_error": 1.0
+      },
+      "llm_critic": {
+        "base_url": "http://localhost:11434/v1",
+        "model": "qwen2.5:7b",
+        "budget_usd": 0.01
+      }
+    },
+    "escalation": {
+      "mode": "ladder",
+      "ladder": [
+        "ollama/qwen2.5:7b",
+        "anthropic/claude-haiku-4-5",
+        "anthropic/claude-sonnet-4-6",
+        "anthropic/claude-opus-4-7"
+      ],
+      "max_model": "anthropic/claude-opus-4-7",
+      "max_depth": 2
+    },
+    "chorus": {
+      "endpoint": null,
+      "timeout_ms": 90000
     },
     "transparency": {
-      "default": "banner"
+      "mode": "banner"
     }
   }
 }
