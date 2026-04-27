@@ -69,9 +69,15 @@ export function formatBanner(
   trace: EscalationTrace,
   locale: string | undefined,
 ): string | null {
-  if (decision.kind === 'pass') return null;
-
   const lang = resolveBannerLocale(locale);
+
+  // Suppress the banner only when the very first response passed —
+  // i.e. the orchestrator said pass AND no escalation ever ran. If a
+  // re-query produced a passing answer (decision: pass, depth > 0),
+  // the banner IS what the user should see: the visible answer comes
+  // from a different model than the client requested, and that's
+  // exactly the transparency goal.
+  if (decision.kind === 'pass' && trace.depth === 0) return null;
 
   if (decision.kind === 'skipped') {
     const text = SKIPPED_TEXT[lang][decision.reason];
@@ -79,7 +85,11 @@ export function formatBanner(
     return `${BANNER_MARKER} ${text}`;
   }
 
-  // decision.kind === 'escalate'
+  // Either decision.kind === 'escalate' (the loop ended without a
+  // passing answer) or decision.kind === 'pass' with depth > 0 (a
+  // re-query produced a passing answer). Both cases share the same
+  // narrative, parameterized by trace.stoppedReason — the i18n table
+  // maps stoppedReason to the user-facing text.
   const text = ESCALATE_TEXT[lang][trace.stoppedReason];
   return `${BANNER_MARKER} ${text}`;
 }

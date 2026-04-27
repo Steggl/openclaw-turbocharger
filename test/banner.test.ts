@@ -49,14 +49,26 @@ describe('resolveBannerLocale', () => {
   });
 });
 
-describe('formatBanner — pass decisions return null', () => {
+describe('formatBanner — pass decisions, depth-aware', () => {
   it.each<string | undefined>(['en', 'de', undefined])(
-    'returns null for pass in locale %s',
+    'returns null for pass with depth=0 in locale %s',
     (locale) => {
       expect(formatBanner(PASS_DECISION, trace('passed'), locale)).toBeNull();
       expect(formatBannerPrefix(PASS_DECISION, trace('passed'), locale)).toBeNull();
     },
   );
+
+  it('emits a banner for pass with depth>0 (re-query produced a passing answer) — English', () => {
+    const banner = formatBanner(PASS_DECISION, trace('passed', 1, ['mid-model']), 'en');
+    expect(banner).toContain('[turbocharger]');
+    expect(banner).toContain('stronger model was used');
+  });
+
+  it('emits a banner for pass with depth>0 — German', () => {
+    const banner = formatBanner(PASS_DECISION, trace('passed', 1, ['mid-model']), 'de');
+    expect(banner).toContain('[turbocharger]');
+    expect(banner).toContain('stärkeres Modell wurde verwendet');
+  });
 });
 
 describe('formatBanner — escalate decisions, English', () => {
