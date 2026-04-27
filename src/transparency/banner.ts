@@ -158,8 +158,7 @@ const SKIPPED_TEXT: Record<
 > = {
   en: {
     non_ok_status: 'The downstream model returned an error response.',
-    non_json_content_type:
-      'The downstream model returned a response that could not be evaluated.',
+    non_json_content_type: 'The downstream model returned a response that could not be evaluated.',
   },
   de: {
     non_ok_status: 'Das Backend-Modell hat eine Fehlerantwort zurückgegeben.',
