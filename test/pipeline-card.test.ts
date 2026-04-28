@@ -312,7 +312,11 @@ describe('pipeline transparency (card)', () => {
       const parsed = JSON.parse(body.toString('utf-8')) as { model: string };
       res.writeHead(200, { 'Content-Type': 'application/json' });
       if (parsed.model === 'weak-model') {
-        res.end(buildChatCompletionBody('Tut mir leid, ich kann dabei nicht helfen.'));
+        // Refusal phrasing in English so the en-pattern fallback catches it.
+        // The hard-signal detector resolves locales by exact key, so 'de-DE'
+        // misses the 'de' bucket and only the en-fallback patterns run.
+        // The banner DE test takes the same approach.
+        res.end(buildChatCompletionBody("I'm sorry, but I cannot help with that."));
       } else {
         res.end(
           buildChatCompletionBody(
