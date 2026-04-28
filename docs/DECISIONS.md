@@ -1207,3 +1207,111 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
   ADR-0013 (no transparency for streaming responses),
   ADR-0021 (chorus-mode is out of transparency layer scope),
   brief §7 and §14.
+
+## ADR-0023: Transparency card is structured Markdown, locale-aware labels, English values
+
+- **Date:** 2026-04-28
+- **Status:** accepted, implements brief §7
+- **Decision:** Issue #10 adds a third transparency mode, `card`,
+  alongside the existing `banner` and `silent`. The card surfaces
+  the full decision context for a single-mode request: initial
+  model, decision kind plus reason, signals with their
+  confidences, the aggregate score, the optional LLM verdict,
+  the escalation path, and the outcome. The format is a kompakte
+  Markdown list under a distinct marker `[turbocharger card]`,
+  followed by a `---` separator and the original assistant
+  content. Structural labels (`Initial model:`, `Decision:`,
+  ...) are localized for the same `en` and `de` locales the
+  banner supports; values stay English (model IDs, signal
+  categories, decision kinds) to match the `x-turbocharger-*`
+  headers and the ADR vocabulary. The pass + depth=0 suppression
+  rule from the banner applies unchanged: a successful first try
+  produces no card. Cost-delta and time-delta are deliberately
+  not part of the v0.1 card.
+- **Rationale:** The banner conveys "something happened" in one
+  sentence; the card answers "what exactly happened" in seven or
+  eight lines. Operators choose between them based on how much
+  decision context they want their end users to see, not on
+  whether they want transparency at all (that's the
+  silent-vs-not axis). Three reasoning steps lead to the
+  specific shape:
+  - *Why Markdown list and not table.* A Markdown table would
+    render attractively in clients that parse Markdown, but the
+    sidecar cannot assume the client does. A pipe-table in a
+    plain-text view is unreadable. A list works in both.
+  - *Why localize labels but not values.* The labels are user-
+    facing prose that benefits from translation. The values are
+    keys into a small known vocabulary that operators and
+    monitoring tooling already work with in English (`refusal`,
+    `hard_signals`, `pass`). Translating those would diverge the
+    user-visible card from the headers and the structured log,
+    which would be more confusing than helpful.
+  - *Why no cost or time delta in v0.1.* Cost-delta requires
+    per-model pricing data the sidecar does not currently have;
+    fabricating one would be the kind of overclaim the project
+    explicitly avoids. Time-delta is captured in the structured
+    log already and adding it to the card would imply a
+    precision the per-request measurement cannot deliver. Both
+    are candidates for a later issue if real demand materializes.
+- **Alternatives considered:**
+  - *Markdown table.* Rejected per "Why Markdown list" above —
+    plain-text-renderer hostility outweighs the visual
+    compactness for clients that do parse Markdown.
+  - *JSON-in-content surface.* Was the original direction in the
+    `card.ts` stub from Issue #1. Rejected because the card's
+    purpose is end-user readability; clients that want
+    machine-readable decision data already have the
+    `x-turbocharger-*` response headers.
+  - *Shared `[turbocharger]` marker for both banner and card.*
+    Rejected because clients that want to strip transparency
+    annotations need to know whether they are looking at a
+    one-line banner or a multi-line card. Distinct markers
+    (`[turbocharger]` and `[turbocharger card]`) make that
+    decision trivial.
+  - *Localizing values too (e.g. `escalate (harte Signale)`).*
+    Rejected for symmetry with the headers and to keep the
+    grep-ability of the card consistent across locales.
+  - *Showing the LLM verdict's free-form `reason` text.*
+    Considered but rejected: it is the most variable field in
+    the decision surface and including it would make the card
+    unpredictable in length. The structured fields (`verdict`
+    and `confidence`) are more useful at the card level; the
+    free-form reason remains available in the structured log.
+- **Mechanical scope:**
+  - `TransparencyConfig.mode` is widened from `'banner' | 'silent'`
+    to `'banner' | 'silent' | 'card'`.
+  - New module `src/transparency/card.ts` exports `formatCard`,
+    `formatCardPrefix`, `resolveCardLocale`, and `CardLocale`.
+    Pure functions, no I/O. Mirrors the structure of `banner.ts`
+    so future maintenance can rely on familiar shapes.
+  - `runSinglePipeline` gets a second branch in the transparency
+    injection block: when `transparencyConfig.mode === 'card'`,
+    `formatCardPrefix` is called and the same
+    `injectBannerIntoBody` helper (renamed in spirit to "inject
+    string prefix into body" but kept under its original name
+    to minimize the diff) prepends it to `choices[0].message.content`.
+  - `DecisionLogEntry.transparency_mode` already widens
+    automatically — its type is `TransparencyConfig['mode']`.
+  - Two test files: `test/card.test.ts` (~30 unit tests covering
+    locale resolution, all stoppedReasons, both decision kinds
+    with and without LLM verdict, signal filtering, all skipped
+    reasons including streaming-returns-null, both Detail-line
+    behaviours, and `formatCardPrefix`) and
+    `test/pipeline-card.test.ts` (6 integration tests covering
+    card-on-escalate, no-card-on-pass, silent-mode, default-silent,
+    not_attempted-with-no-Path-line, and the German locale).
+- **Consequences for downstream issues:**
+  - Issue #11 (config:schema) needs `'card'` as a third allowed
+    value in the `TransparencyConfig.mode` enum and an example
+    deployment showing card-style configuration.
+  - Issue #12 (per-request header override) gains
+    `X-Turbocharger-Transparency: card` as a valid value
+    alongside `banner` and `silent`.
+  - The README's transparency section already mentioned the card
+    as upcoming; that mention can now point to a real card
+    output example.
+- **Related:** ADR-0007 (transparency-as-design-principle),
+  ADR-0013 (no transparency for streaming responses),
+  ADR-0021 (chorus-mode is out of transparency layer scope),
+  ADR-0022 (transparency banner — the sibling decision this
+  one mirrors structurally), brief §7.
