@@ -510,10 +510,18 @@ export interface ChorusTrace {
  * deliberate choice: response-body mutation is invasive and should
  * only happen when the operator has consciously chosen it.
  *
- * Issue #10 will add `mode: 'card'` for a structured JSON-in-content
- * surface as a third option. Chorus-mode responses are out of scope
- * for the transparency layer per ADR-0021.
+ * Issue #10 adds `mode: 'card'`: a structured Markdown block — the
+ * `[turbocharger card]` marker, a list of fields describing the
+ * decision (initial model, decision kind + reason, signals,
+ * aggregate score, escalation path, outcome), a `---` separator,
+ * and the original assistant content. The card surfaces more
+ * detail than the single-line banner for operators who want
+ * end users to see the full decision context. Like the banner
+ * it is opt-in; the technical default remains `silent`.
+ *
+ * Chorus-mode responses are out of scope for the transparency layer
+ * per ADR-0021.
  */
 export interface TransparencyConfig {
-  readonly mode: 'banner' | 'silent';
+  readonly mode: 'banner' | 'silent' | 'card';
 }
