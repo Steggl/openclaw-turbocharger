@@ -1235,18 +1235,18 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
   whether they want transparency at all (that's the
   silent-vs-not axis). Three reasoning steps lead to the
   specific shape:
-  - *Why Markdown list and not table.* A Markdown table would
+  - _Why Markdown list and not table._ A Markdown table would
     render attractively in clients that parse Markdown, but the
     sidecar cannot assume the client does. A pipe-table in a
     plain-text view is unreadable. A list works in both.
-  - *Why localize labels but not values.* The labels are user-
+  - _Why localize labels but not values._ The labels are user-
     facing prose that benefits from translation. The values are
     keys into a small known vocabulary that operators and
     monitoring tooling already work with in English (`refusal`,
     `hard_signals`, `pass`). Translating those would diverge the
     user-visible card from the headers and the structured log,
     which would be more confusing than helpful.
-  - *Why no cost or time delta in v0.1.* Cost-delta requires
+  - _Why no cost or time delta in v0.1._ Cost-delta requires
     per-model pricing data the sidecar does not currently have;
     fabricating one would be the kind of overclaim the project
     explicitly avoids. Time-delta is captured in the structured
@@ -1254,24 +1254,24 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
     precision the per-request measurement cannot deliver. Both
     are candidates for a later issue if real demand materializes.
 - **Alternatives considered:**
-  - *Markdown table.* Rejected per "Why Markdown list" above —
+  - _Markdown table._ Rejected per "Why Markdown list" above —
     plain-text-renderer hostility outweighs the visual
     compactness for clients that do parse Markdown.
-  - *JSON-in-content surface.* Was the original direction in the
+  - _JSON-in-content surface._ Was the original direction in the
     `card.ts` stub from Issue #1. Rejected because the card's
     purpose is end-user readability; clients that want
     machine-readable decision data already have the
     `x-turbocharger-*` response headers.
-  - *Shared `[turbocharger]` marker for both banner and card.*
+  - _Shared `[turbocharger]` marker for both banner and card._
     Rejected because clients that want to strip transparency
     annotations need to know whether they are looking at a
     one-line banner or a multi-line card. Distinct markers
     (`[turbocharger]` and `[turbocharger card]`) make that
     decision trivial.
-  - *Localizing values too (e.g. `escalate (harte Signale)`).*
+  - _Localizing values too (e.g. `escalate (harte Signale)`)._
     Rejected for symmetry with the headers and to keep the
     grep-ability of the card consistent across locales.
-  - *Showing the LLM verdict's free-form `reason` text.*
+  - _Showing the LLM verdict's free-form `reason` text._
     Considered but rejected: it is the most variable field in
     the decision surface and including it would make the card
     unpredictable in length. The structured fields (`verdict`
