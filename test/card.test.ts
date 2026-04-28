@@ -84,12 +84,7 @@ describe('formatCard — pass decisions, depth-aware', () => {
   );
 
   it('emits a card for pass with depth>0 (re-query produced a passing answer) — English', () => {
-    const card = formatCard(
-      PASS_DECISION,
-      trace('passed', 1, ['mid-model']),
-      'weak-model',
-      'en',
-    );
+    const card = formatCard(PASS_DECISION, trace('passed', 1, ['mid-model']), 'weak-model', 'en');
     expect(card).toContain('[turbocharger card]');
     expect(card).toContain('Initial model: weak-model');
     expect(card).toContain('Decision: pass (after escalation)');
@@ -98,12 +93,7 @@ describe('formatCard — pass decisions, depth-aware', () => {
   });
 
   it('emits a card for pass with depth>0 — German', () => {
-    const card = formatCard(
-      PASS_DECISION,
-      trace('passed', 1, ['mid-model']),
-      'weak-model',
-      'de',
-    );
+    const card = formatCard(PASS_DECISION, trace('passed', 1, ['mid-model']), 'weak-model', 'de');
     expect(card).toContain('[turbocharger card]');
     expect(card).toContain('Initiales Modell: weak-model');
     expect(card).toContain('Entscheidung: pass (nach Eskalation)');
