@@ -41,6 +41,7 @@ import { maxStep } from './escalation/max.js';
 import { dispatchChorus } from './chorus/dispatch.js';
 import { forwardChatCompletion } from './proxy.js';
 import { formatBannerPrefix } from './transparency/banner.js';
+import { formatCardPrefix } from './transparency/card.js';
 import type {
   AnswerMode,
   ChorusConfig,
@@ -282,12 +283,15 @@ export interface PipelineInput {
   readonly escalationConfig?: EscalationConfig;
   /**
    * Optional transparency configuration. When `mode: 'banner'`, the
-   * pipeline prepends a localized banner to the assistant content for
-   * single-mode requests where the orchestrator decided escalate or
-   * skipped-with-reason. When absent or `mode: 'silent'`, the
-   * response body is forwarded unchanged. Per Issue #9 and ADR-0022,
-   * chorus-mode responses are never modified by the transparency
-   * layer regardless of this setting.
+   * pipeline prepends a localized single-line banner to the assistant
+   * content for single-mode requests where the orchestrator decided
+   * escalate or skipped-with-reason. When `mode: 'card'`, the
+   * pipeline instead prepends a structured Markdown card with the
+   * full decision context (initial model, signals, aggregate, path,
+   * outcome). When absent or `mode: 'silent'`, the response body is
+   * forwarded unchanged. Per ADR-0021, chorus-mode responses are
+   * never modified by the transparency layer regardless of this
+   * setting.
    */
   readonly transparencyConfig?: TransparencyConfig;
 }
@@ -546,6 +550,20 @@ async function runSinglePipeline(input: PipelineInput): Promise<SinglePipelineRe
     }
   }
 
+  // Transparency card injection (Issue #10). Same hook point as the
+  // banner; mode is mutually exclusive (transparencyConfig.mode is
+  // either 'banner', 'card', or 'silent'), so at most one of these
+  // two blocks runs per request. The card carries more context
+  // (initial model, signals, aggregate, path, outcome) and uses
+  // `[turbocharger card]` as its marker so clients can distinguish
+  // the two surfaces.
+  if (input.transparencyConfig?.mode === 'card') {
+    const card = formatCardPrefix(currentDecision, trace, parsed.model, parsed.locale);
+    if (card !== null) {
+      currentBodyText = injectBannerIntoBody(currentBodyText, card);
+    }
+  }
+
   const reconstituted = new Response(currentBodyText, {
     status: currentResponse.status,
     statusText: currentResponse.statusText,
@@ -580,12 +598,18 @@ function buildOrchestratorInput(
 }
 
 /**
- * Prepend the transparency banner to `choices[0].message.content` of
- * an OpenAI-compatible chat completion JSON body. Returns the modified
- * body as a string.
+ * Prepend a transparency prefix (banner or card) to
+ * `choices[0].message.content` of an OpenAI-compatible chat
+ * completion JSON body. Returns the modified body as a string.
+ *
+ * The function is shape-agnostic about the prefix — banner and
+ * card both produce a string that, when prepended, yields the
+ * intended Markdown-style annotation. Issue #9 introduced this
+ * helper for the banner; Issue #10 reuses it unchanged for the
+ * card by passing a longer prefix string.
  *
  * If the body is malformed JSON or the choices array is missing, the
- * banner cannot be safely injected and the original body is returned
+ * prefix cannot be safely injected and the original body is returned
  * unchanged. The pipeline has already established earlier that the
  * downstream content-type is `application/json` and the orchestrator
  * could parse the response, so a malformed body here would be unusual,
