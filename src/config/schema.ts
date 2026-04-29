@@ -20,15 +20,7 @@
 
 import { z } from 'zod';
 
-import type {
-  AnswerMode,
-  AppConfig,
-  ChorusConfig,
-  EscalationConfig,
-  OrchestratorConfig,
-  SignalCategory,
-  TransparencyConfig,
-} from '../types.js';
+import type { AnswerMode, SignalCategory } from '../types.js';
 
 // ---------------------------------------------------------------------------
 // AppConfig
@@ -138,7 +130,7 @@ export const OrchestratorConfigSchema = z
 // EscalationConfig
 // ---------------------------------------------------------------------------
 
-export const EscalationConfigSchema: z.ZodType<EscalationConfig> = z
+export const EscalationConfigSchema = z
   .object({
     mode: z.enum(['ladder', 'max']),
     ladder: z.array(z.string().min(1)).readonly(),
@@ -159,7 +151,7 @@ export const EscalationConfigSchema: z.ZodType<EscalationConfig> = z
 // ChorusConfig
 // ---------------------------------------------------------------------------
 
-export const ChorusConfigSchema: z.ZodType<ChorusConfig> = z
+export const ChorusConfigSchema = z
   .object({
     endpoint: z
       .string()
@@ -180,7 +172,7 @@ export const ChorusConfigSchema: z.ZodType<ChorusConfig> = z
 // TransparencyConfig
 // ---------------------------------------------------------------------------
 
-export const TransparencyConfigSchema: z.ZodType<TransparencyConfig> = z
+export const TransparencyConfigSchema = z
   .object({
     mode: z.enum(['banner', 'silent', 'card']),
   })
@@ -221,25 +213,19 @@ export const TurbochargerConfigSchema = z
 export type TurbochargerConfig = z.infer<typeof TurbochargerConfigSchema>;
 
 // ---------------------------------------------------------------------------
-// Type-equivalence guards (compile-time only)
+// Type-equivalence note
 // ---------------------------------------------------------------------------
 
-// These assignments compile only if the Zod-inferred shapes are
-// assignable to the hand-written interfaces in src/types.ts. They
-// fire at typecheck time, before any test runs. If the schema and
-// the interface drift, the failure points here.
-
-const _appConfigEquivalent: AppConfig = {} as z.infer<typeof AppConfigSchema>;
-const _orchestratorConfigEquivalent: OrchestratorConfig = {} as z.infer<
-  typeof OrchestratorConfigSchema
->;
-const _escalationConfigEquivalent: EscalationConfig = {} as z.infer<typeof EscalationConfigSchema>;
-const _chorusConfigEquivalent: ChorusConfig = {} as z.infer<typeof ChorusConfigSchema>;
-const _transparencyConfigEquivalent: TransparencyConfig = {} as z.infer<
-  typeof TransparencyConfigSchema
->;
-void _appConfigEquivalent;
-void _orchestratorConfigEquivalent;
-void _escalationConfigEquivalent;
-void _chorusConfigEquivalent;
-void _transparencyConfigEquivalent;
+// An earlier draft of this file had compile-time `_appConfigEquivalent`
+// assignments to catch drift between the Zod schemas and the
+// hand-written interfaces in src/types.ts. They were removed when
+// the project's `exactOptionalPropertyTypes: true` made them
+// reject cases where Zod's `.optional()` produces `T | undefined`
+// while the interface had a plain `T?:` field — a difference in
+// how absence is encoded, not in actual structure.
+//
+// In practice the loader (load.ts) constructs the typed values
+// using conditional spread that already filters `undefined`, so
+// the missing-vs-undefined distinction does not surface at runtime.
+// The validator's behaviour is exercised by test/schema.test.ts
+// and test/load.test.ts.

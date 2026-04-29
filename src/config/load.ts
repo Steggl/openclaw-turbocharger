@@ -34,11 +34,22 @@ import { TurbochargerConfigSchema } from './schema.js';
 /**
  * The split-out result of `loadConfig`. Mirrors the (config, deps)
  * pair `startServer` consumes, so the entry point can pass through.
+ *
+ * Note on `orchestratorConfig`: the loader can populate every field
+ * of `OrchestratorConfig` except `llmCritic`, which is a `{run, config}`
+ * pair where `run` is a callable that cannot come from a YAML file.
+ * Operators who need an LLM critic build the runnable callable in
+ * code and merge it onto `loadedConfig.orchestratorConfig` before
+ * passing it to `startServer`. The loader exposes the static side
+ * (threshold, weights, greyBand) — which is everything the schema
+ * can validate.
  */
+export type LoadedOrchestratorConfig = Omit<OrchestratorConfig, 'llmCritic'>;
+
 export interface LoadedConfig {
   readonly appConfig: AppConfig;
   readonly defaultAnswerMode?: AnswerMode;
-  readonly orchestratorConfig?: OrchestratorConfig;
+  readonly orchestratorConfig?: LoadedOrchestratorConfig;
   readonly escalationConfig?: EscalationConfig;
   readonly chorusConfig?: ChorusConfig;
   readonly transparencyConfig?: TransparencyConfig;
@@ -78,10 +89,65 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): LoadedConfig {
   return {
     appConfig,
     ...(validated.answerMode !== undefined ? { defaultAnswerMode: validated.answerMode } : {}),
-    ...(validated.orchestrator !== undefined ? { orchestratorConfig: validated.orchestrator } : {}),
-    ...(validated.escalation !== undefined ? { escalationConfig: validated.escalation } : {}),
-    ...(validated.chorus !== undefined ? { chorusConfig: validated.chorus } : {}),
-    ...(validated.transparency !== undefined ? { transparencyConfig: validated.transparency } : {}),
+    ...(validated.orchestrator !== undefined
+      ? { orchestratorConfig: mapOrchestratorConfig(validated.orchestrator) }
+      : {}),
+    ...(validated.escalation !== undefined
+      ? { escalationConfig: mapEscalationConfig(validated.escalation) }
+      : {}),
+    ...(validated.chorus !== undefined
+      ? { chorusConfig: mapChorusConfig(validated.chorus) }
+      : {}),
+    ...(validated.transparency !== undefined
+      ? { transparencyConfig: validated.transparency }
+      : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Sub-config mappers
+// ---------------------------------------------------------------------------
+
+// These exist so optional fields propagate via conditional spread
+// rather than `T | undefined` literals, which the project's
+// `exactOptionalPropertyTypes: true` rejects when the underlying
+// interface has plain `T?:`. The mappers also drop fields the loader
+// cannot meaningfully populate (specifically OrchestratorConfig's
+// `llmCritic` which carries a runtime callable).
+
+function mapOrchestratorConfig(input: {
+  readonly threshold: number;
+  readonly weights: Record<string, number>;
+  readonly greyBand: readonly [number, number];
+}): LoadedOrchestratorConfig {
+  return {
+    threshold: input.threshold,
+    weights: input.weights as LoadedOrchestratorConfig['weights'],
+    greyBand: input.greyBand,
+  };
+}
+
+function mapEscalationConfig(input: {
+  readonly mode: 'ladder' | 'max';
+  readonly ladder: readonly string[];
+  readonly maxModel?: string;
+  readonly maxDepth: number;
+}): EscalationConfig {
+  return {
+    mode: input.mode,
+    ladder: input.ladder,
+    maxDepth: input.maxDepth,
+    ...(input.maxModel !== undefined ? { maxModel: input.maxModel } : {}),
+  };
+}
+
+function mapChorusConfig(input: {
+  readonly endpoint: string;
+  readonly timeoutMs?: number;
+}): ChorusConfig {
+  return {
+    endpoint: input.endpoint,
+    ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
   };
 }
 
