@@ -1348,45 +1348,45 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
 - **Rationale:** The four sub-decisions all reflect the same
   underlying value: the loader has to be obviously correct from
   the operator's perspective. That breaks down into:
-  - *Types-first* keeps the mental model "the code defines the
+  - _Types-first_ keeps the mental model "the code defines the
     shape; the schema validates against it" rather than the
     reverse, which would propagate Zod's quirks through the
     project. The compile-time equivalence guard means nobody
     silently forgets to update the schema after editing a type.
-  - *YAML and JSON* is what operators expect; insisting on one
+  - _YAML and JSON_ is what operators expect; insisting on one
     creates friction. Both parsers are mature and the file
     format is the operator's choice, not the loader's.
-  - *Env-overrides-file* matches 12-factor expectations and lets
+  - _Env-overrides-file_ matches 12-factor expectations and lets
     deployments use a checked-in config-file baseline plus
     per-environment env overrides. The reverse precedence
     (file overrides env) would make container deployments
     awkward because you cannot set env vars from inside an
     immutable image.
-  - *Hard rename to `TURBOCHARGER_`* avoids namespace collisions
+  - _Hard rename to `TURBOCHARGER_`_ avoids namespace collisions
     (`TURBO_PORT` could plausibly belong to other tooling). The
     previous prefix shipped only in pre-MVP code; the cost of
     breaking is paid by exactly one user (the maintainer).
 - **Alternatives considered:**
-  - *Zod as source of truth.* Rejected: the existing
+  - _Zod as source of truth._ Rejected: the existing
     `src/types.ts` is the central type surface that every module
     depends on; rewriting all consumers to import from
     `z.infer<>` would dwarf the actual loader work and risk the
     rest of the MVP timeline.
-  - *Single file format (YAML only).* Rejected: JSON is
+  - _Single file format (YAML only)._ Rejected: JSON is
     machine-friendly for tooling, YAML is human-friendly for
     hand-edit. Supporting both costs ~30 lines and removes the
     operator's "wait, which format does this thing want" check.
-  - *Per-step env vars only, no config file.* Rejected: a
+  - _Per-step env vars only, no config file._ Rejected: a
     20-field deployment with weights, ladder, chorus endpoint,
     and transparency mode is unreadable as a flat env var dump.
     Operators want a structured artifact they can review.
-  - *File overrides env.* Rejected per "Rationale" above —
+  - _File overrides env._ Rejected per "Rationale" above —
     incompatible with immutable container images.
-  - *Deprecate-and-warn the `TURBO_` prefix.* Rejected: the
+  - _Deprecate-and-warn the `TURBO_` prefix._ Rejected: the
     deprecation window adds permanent code complexity (alias
     table, warning emission, eventual removal) for zero
     deployed users. Hard rename is honest.
-  - *Lenient unknown-field handling.* Rejected: silent
+  - _Lenient unknown-field handling._ Rejected: silent
     acceptance of typos like `transparancy.mode` is exactly the
     "no silent fallbacks" failure mode the brief calls out.
     `.strict()` on every Zod object means a typo fails loudly.
