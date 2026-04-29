@@ -81,9 +81,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): LoadedConfig {
     ...(validated.orchestrator !== undefined ? { orchestratorConfig: validated.orchestrator } : {}),
     ...(validated.escalation !== undefined ? { escalationConfig: validated.escalation } : {}),
     ...(validated.chorus !== undefined ? { chorusConfig: validated.chorus } : {}),
-    ...(validated.transparency !== undefined
-      ? { transparencyConfig: validated.transparency }
-      : {}),
+    ...(validated.transparency !== undefined ? { transparencyConfig: validated.transparency } : {}),
   };
 }
 
@@ -168,10 +166,7 @@ function deepMerge(
       typeof value === 'object' &&
       !Array.isArray(value)
     ) {
-      out[key] = deepMerge(
-        leftValue as Record<string, unknown>,
-        value as Record<string, unknown>,
-      );
+      out[key] = deepMerge(leftValue as Record<string, unknown>, value as Record<string, unknown>);
     } else {
       out[key] = value;
     }

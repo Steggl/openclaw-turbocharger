@@ -307,9 +307,7 @@ if (isDirectRun) {
     ...(loaded.orchestratorConfig !== undefined
       ? { orchestratorConfig: loaded.orchestratorConfig }
       : {}),
-    ...(loaded.escalationConfig !== undefined
-      ? { escalationConfig: loaded.escalationConfig }
-      : {}),
+    ...(loaded.escalationConfig !== undefined ? { escalationConfig: loaded.escalationConfig } : {}),
     ...(loaded.chorusConfig !== undefined ? { chorusConfig: loaded.chorusConfig } : {}),
     ...(loaded.transparencyConfig !== undefined
       ? { transparencyConfig: loaded.transparencyConfig }
