@@ -95,12 +95,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): LoadedConfig {
     ...(validated.escalation !== undefined
       ? { escalationConfig: mapEscalationConfig(validated.escalation) }
       : {}),
-    ...(validated.chorus !== undefined
-      ? { chorusConfig: mapChorusConfig(validated.chorus) }
-      : {}),
-    ...(validated.transparency !== undefined
-      ? { transparencyConfig: validated.transparency }
-      : {}),
+    ...(validated.chorus !== undefined ? { chorusConfig: mapChorusConfig(validated.chorus) } : {}),
+    ...(validated.transparency !== undefined ? { transparencyConfig: validated.transparency } : {}),
   };
 }
 
@@ -130,7 +126,7 @@ function mapOrchestratorConfig(input: {
 function mapEscalationConfig(input: {
   readonly mode: 'ladder' | 'max';
   readonly ladder: readonly string[];
-  readonly maxModel?: string;
+  readonly maxModel?: string | undefined;
   readonly maxDepth: number;
 }): EscalationConfig {
   return {
@@ -143,7 +139,7 @@ function mapEscalationConfig(input: {
 
 function mapChorusConfig(input: {
   readonly endpoint: string;
-  readonly timeoutMs?: number;
+  readonly timeoutMs?: number | undefined;
 }): ChorusConfig {
   return {
     endpoint: input.endpoint,
@@ -193,13 +189,30 @@ function readFileFromEnv(env: NodeJS.ProcessEnv): Record<string, unknown> {
  * that already look camelCase are passed through unchanged so a
  * mixed-case file (e.g. partly hand-written, partly tool-generated)
  * still works.
+ *
+ * One exception: paths that the schema treats as data keys rather
+ * than structural keys are not converted. The orchestrator's
+ * `weights` map is the obvious case — `tool_error` and
+ * `syntax_error` are `SignalCategory` values (snake_case by
+ * project convention) and the schema expects them verbatim.
  */
-function normalizeFileShape(input: Record<string, unknown>): Record<string, unknown> {
+const PRESERVE_KEY_PATHS: ReadonlySet<string> = new Set(['orchestrator.weights']);
+
+function normalizeFileShape(
+  input: Record<string, unknown>,
+  pathPrefix = '',
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
     const camelKey = snakeToCamel(key);
+    const currentPath = pathPrefix === '' ? camelKey : `${pathPrefix}.${camelKey}`;
     if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-      out[camelKey] = normalizeFileShape(value as Record<string, unknown>);
+      if (PRESERVE_KEY_PATHS.has(currentPath)) {
+        // Children of this path are data keys; pass through unchanged.
+        out[camelKey] = { ...(value as Record<string, unknown>) };
+      } else {
+        out[camelKey] = normalizeFileShape(value as Record<string, unknown>, currentPath);
+      }
     } else {
       out[camelKey] = value;
     }
