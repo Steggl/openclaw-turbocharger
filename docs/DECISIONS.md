@@ -1363,7 +1363,7 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
     awkward because you cannot set env vars from inside an
     immutable image.
   - _Hard rename to `TURBOCHARGER_`_ avoids namespace collisions
-    (`TURBO_PORT` could plausibly belong to other tooling). The
+(`TURBO_PORT` could plausibly belong to other tooling). The
     previous prefix shipped only in pre-MVP code; the cost of
     breaking is paid by exactly one user (the maintainer).
 - **Alternatives considered:**
@@ -1382,7 +1382,7 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
     Operators want a structured artifact they can review.
   - _File overrides env._ Rejected per "Rationale" above —
     incompatible with immutable container images.
-  - _Deprecate-and-warn the `TURBO_` prefix._ Rejected: the
+  - _Deprecate-and-warn the `TURBO_` prefix.\_ Rejected: the
     deprecation window adds permanent code complexity (alias
     table, warning emission, eventual removal) for zero
     deployed users. Hard rename is honest.
