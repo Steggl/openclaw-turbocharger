@@ -1315,3 +1315,125 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
   ADR-0021 (chorus-mode is out of transparency layer scope),
   ADR-0022 (transparency banner — the sibling decision this
   one mirrors structurally), brief §7.
+
+## ADR-0024: Configuration is YAML/JSON, env-overrides-file, Zod-validated, types-first
+
+- **Date:** 2026-04-29
+- **Status:** accepted, implements brief §5 and §8
+- **Decision:** Issue #11 introduces a full configuration loader.
+  Four sub-decisions are bundled into a single ADR because they
+  describe one cohesive system:
+  1. **Source of truth.** TypeScript interfaces in `src/types.ts`
+     remain authoritative. Zod schemas in `src/config/schema.ts`
+     are written so that `z.infer<typeof X>` is structurally
+     assignable to the corresponding hand-written interface; a
+     compile-time guard in the same file flags drift.
+  2. **File formats.** YAML and JSON are both accepted. File
+     extension decides parser (`.yaml`/`.yml` → YAML, `.json` →
+     JSON). The `yaml` npm package is the third runtime
+     dependency, well within the brief's "fewer than five"
+     ceiling.
+  3. **Source precedence.** Environment variables override file
+     values; file values override the hard-coded `port = 11435`
+     default. The merge is deep: an orchestrator block in a YAML
+     plus a `TURBOCHARGER_ORCHESTRATOR__THRESHOLD` env override
+     produces a single merged orchestrator config.
+  4. **Env-var convention.** Prefix is `TURBOCHARGER_`. Nested
+     fields use `__` (double underscore) as path separator;
+     primitive arrays use `,` as element separator. The legacy
+     `TURBO_` prefix from Issue #2 is removed in this commit (a
+     hard rename — no alias, no deprecation period). Pre-v0.1
+     tolerates breaking changes; carrying an alias forever is
+     more confusing than fixing it now.
+- **Rationale:** The four sub-decisions all reflect the same
+  underlying value: the loader has to be obviously correct from
+  the operator's perspective. That breaks down into:
+  - *Types-first* keeps the mental model "the code defines the
+    shape; the schema validates against it" rather than the
+    reverse, which would propagate Zod's quirks through the
+    project. The compile-time equivalence guard means nobody
+    silently forgets to update the schema after editing a type.
+  - *YAML and JSON* is what operators expect; insisting on one
+    creates friction. Both parsers are mature and the file
+    format is the operator's choice, not the loader's.
+  - *Env-overrides-file* matches 12-factor expectations and lets
+    deployments use a checked-in config-file baseline plus
+    per-environment env overrides. The reverse precedence
+    (file overrides env) would make container deployments
+    awkward because you cannot set env vars from inside an
+    immutable image.
+  - *Hard rename to `TURBOCHARGER_`* avoids namespace collisions
+    (`TURBO_PORT` could plausibly belong to other tooling). The
+    previous prefix shipped only in pre-MVP code; the cost of
+    breaking is paid by exactly one user (the maintainer).
+- **Alternatives considered:**
+  - *Zod as source of truth.* Rejected: the existing
+    `src/types.ts` is the central type surface that every module
+    depends on; rewriting all consumers to import from
+    `z.infer<>` would dwarf the actual loader work and risk the
+    rest of the MVP timeline.
+  - *Single file format (YAML only).* Rejected: JSON is
+    machine-friendly for tooling, YAML is human-friendly for
+    hand-edit. Supporting both costs ~30 lines and removes the
+    operator's "wait, which format does this thing want" check.
+  - *Per-step env vars only, no config file.* Rejected: a
+    20-field deployment with weights, ladder, chorus endpoint,
+    and transparency mode is unreadable as a flat env var dump.
+    Operators want a structured artifact they can review.
+  - *File overrides env.* Rejected per "Rationale" above —
+    incompatible with immutable container images.
+  - *Deprecate-and-warn the `TURBO_` prefix.* Rejected: the
+    deprecation window adds permanent code complexity (alias
+    table, warning emission, eventual removal) for zero
+    deployed users. Hard rename is honest.
+  - *Lenient unknown-field handling.* Rejected: silent
+    acceptance of typos like `transparancy.mode` is exactly the
+    "no silent fallbacks" failure mode the brief calls out.
+    `.strict()` on every Zod object means a typo fails loudly.
+- **Mechanical scope:**
+  - `src/config/schema.ts`: full module replacing the Issue #1
+    stub. One Zod schema per Config interface, plus a top-level
+    `TurbochargerConfigSchema` composing them. Compile-time
+    type-equivalence guards.
+  - `src/config/env.ts`: rewritten to expose two entry points.
+    `parseEnvVars` is the new full parser used by the loader;
+    `loadEnvConfig` is preserved as a thin shim so the existing
+    `startServer(config = loadEnvConfig())` default keeps
+    working. The legacy `TURBO_` prefix is replaced by
+    `TURBOCHARGER_` everywhere — no alias.
+  - `src/config/file.ts`: new module. Parses YAML/JSON from a
+    path; rejects unsupported extensions with an actionable
+    message; surfaces parser errors with the file path
+    included.
+  - `src/config/load.ts`: new module replacing the Issue #1
+    stub. `loadConfig(env)` reads `TURBOCHARGER_CONFIG` if set,
+    parses the file, deep-merges file+env+defaults, validates
+    via the top-level schema, and returns a `LoadedConfig` that
+    the entry point destructures into the existing
+    `startServer(appConfig, deps)` call.
+  - `src/server.ts`: direct-run path switches from
+    `loadEnvConfig()` to `loadConfig()`; programmatic
+    `startServer(config)` callers (used in tests) keep the old
+    AppConfig-only signature via the `loadEnvConfig` shim.
+  - Three test files: `test/env.test.ts` (~22 unit tests for
+    `parseEnvVars` and `loadEnvConfig`), `test/schema.test.ts`
+    (~25 unit tests covering each schema's accept/reject paths),
+    and `test/load.test.ts` (~17 integration tests including
+    real tmpfile YAML/JSON loading and merge semantics).
+  - Two new runtime dependencies: `zod` and `yaml`. Total
+    runtime deps: 4 (still within the brief's <5 ceiling).
+    Operators pulling from main need to run `pnpm add zod yaml`
+    once before applying the patch — see the PR's apply
+    instructions.
+- **Consequences for downstream issues:**
+  - Issue #12 (per-request override) sits cleanly on top: the
+    request-level override layer reads headers, applies them on
+    top of the loaded `LoadedConfig`, and re-validates the
+    request-scoped result through the same schema.
+  - Issue #15 (release) gains the YAML config example as part
+    of the documented quickstart.
+  - The `examples/standalone-config.example.yaml` shape is now
+    enforced — any drift between it and the schema would fail
+    the validator in operator hands.
+- **Related:** ADR-0001 (Node 22 pin), brief §5 (config shape),
+  brief §8 (no silent fallbacks; actionable error messages).
