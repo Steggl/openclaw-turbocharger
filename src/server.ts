@@ -16,6 +16,7 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 
 import { loadEnvConfig } from './config/env.js';
+import { loadConfig } from './config/load.js';
 import { runPipeline } from './pipeline.js';
 import { forwardChatCompletion } from './proxy.js';
 import type {
@@ -293,14 +294,33 @@ const isDirectRun = (() => {
 })();
 
 if (isDirectRun) {
-  const config = loadEnvConfig();
-  const handle = startServer(config);
+  // Use the full file-and-env loader for direct-run deployments;
+  // any sub-config (orchestrator, escalation, chorus, transparency)
+  // can come in from a TURBOCHARGER_CONFIG file or matching
+  // environment variables. The two-arg startServer signature lets
+  // us pass both the AppConfig and the deps in one call.
+  const loaded = loadConfig();
+  const handle = startServer(loaded.appConfig, {
+    ...(loaded.defaultAnswerMode !== undefined
+      ? { defaultAnswerMode: loaded.defaultAnswerMode }
+      : {}),
+    ...(loaded.orchestratorConfig !== undefined
+      ? { orchestratorConfig: loaded.orchestratorConfig }
+      : {}),
+    ...(loaded.escalationConfig !== undefined
+      ? { escalationConfig: loaded.escalationConfig }
+      : {}),
+    ...(loaded.chorusConfig !== undefined ? { chorusConfig: loaded.chorusConfig } : {}),
+    ...(loaded.transparencyConfig !== undefined
+      ? { transparencyConfig: loaded.transparencyConfig }
+      : {}),
+  });
   process.stderr.write(
     `${JSON.stringify({
       ts: new Date().toISOString(),
       event: 'listen',
       port: handle.port,
-      downstream: config.downstreamBaseUrl,
+      downstream: loaded.appConfig.downstreamBaseUrl,
     })}\n`,
   );
 
