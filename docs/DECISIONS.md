@@ -1437,3 +1437,131 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
     the validator in operator hands.
 - **Related:** ADR-0001 (Node 22 pin), brief §5 (config shape),
   brief §8 (no silent fallbacks; actionable error messages).
+
+## ADR-0025: Per-request overrides via two headers, tolerant-with-reject
+
+- **Date:** 2026-04-30
+- **Status:** accepted, implements brief §5 ("Per-chat override")
+  and Issue #12.
+- **Decision:** Issue #12 wires per-request overrides on top of the
+  static configuration loaded by Issue #11. Four sub-decisions are
+  bundled because they describe one cohesive request-level layer:
+  1. **Two headers, not three.** `X-Turbocharger-Answer-Mode`
+     (`single`|`chorus`) and `X-Turbocharger-Transparency`
+     (`silent`|`banner`|`card`). Other configuration surfaces
+     (orchestrator weights, escalation ladder, chorus endpoint)
+     stay strictly server-side; per-request mutation of those
+     would let a misconfigured client cripple the deployment's
+     escalation behaviour or force-route to an attacker-controlled
+     chorus endpoint.
+  2. **Invalid values are rejected, not raised as 4xx.** When a
+     header carries an unrecognised value (typo, version skew),
+     the request continues with the configured defaults and the
+     response carries an `x-turbocharger-override-rejected`
+     header listing what was ignored. The header format is
+     `field=value:reason` entries comma-separated. This matches
+     the brief's "no silent fallbacks" rule (the rejection is
+     visible) without making the sidecar fragile to client typos.
+  3. **A `chorus` answer-mode override is rejected when no chorus
+     is configured.** Functionally the same path as an invalid
+     value, but with the dedicated `chorus-config-missing`
+     reason so monitoring tools can distinguish "client typo"
+     from "deployment lacks chorus support". The request
+     continues in single mode.
+  4. **Tracking.** `DecisionLogEntry` gains three optional
+     fields: `answer_mode_override`, `transparency_mode_override`,
+     and `override_rejected`. Response headers
+     `x-turbocharger-answer-mode` and (when relevant) the
+     transparency-emitted markers reflect the effective mode,
+     not the default. An operator looking at logs or response
+     headers can always tell which mode actually ran and why.
+- **Rationale:** The four sub-decisions all flow from one core
+  question: should per-request overrides be powerful or
+  defensive. Powerful overrides (every config field, opaque JSON
+  blob, no validation) hand the request author too much rope
+  for a sidecar that sits between an LLM client and an LLM
+  provider. Defensive overrides (two well-known fields, strict
+  enum validation, transparent rejection) cover the named use
+  cases in the brief — per-chat answer mode, per-request
+  visibility level — without expanding the attack surface.
+  Tolerant-with-reject specifically beats hard 4xx because:
+  - A client setting a transparency value the server does not
+    know about is more likely to be running a stale build than
+    sending hostile traffic. The "right" failure mode is to
+    proceed with defaults, not to refuse the underlying chat
+    completion.
+  - Returning 4xx loses the chat completion entirely, which
+    the request author cannot recover from without redoing the
+    whole request. Logging the rejection on a header is
+    cheaper for everyone.
+- **Alternatives considered:**
+  - *Three headers including `X-Turbocharger-Escalation-Mode`
+    (ladder|max).* Rejected for the MVP. The escalation
+    strategy is a deployment-wide cost-vs-quality tradeoff,
+    not a per-request choice the client can sensibly make. If
+    a future use case appears, the same tolerant-with-reject
+    machinery accommodates it without redesign.
+  - *HTTP 400 on invalid value.* Rejected per "Rationale"
+    above — the cost of refusing the request outweighs the
+    benefit of a slightly louder failure signal.
+  - *Silent ignore of invalid values.* Rejected as a brief
+    violation: silent fallbacks are exactly the failure mode
+    §8 calls out.
+  - *JSON-structured `x-turbocharger-override-rejected`
+    header* (e.g. `[{"field":"transparency",…}]`). Rejected:
+    response headers are line-oriented, JSON inside one header
+    is awkward to read in `curl -v` and tools like nginx
+    access logs typically truncate at commas anyway. The
+    `field=value:reason` form parses with one `split(", ")`
+    and one `split("=")`/`split(":")` pair per entry.
+  - *Allow override of `defaultAnswerMode` only when the
+    overriding value matches what is configured (i.e. accept
+    `single` if defaultAnswerMode is single; accept `chorus`
+    only if a chorus is configured AND defaultAnswerMode is
+    chorus).* Rejected as too restrictive. The whole point of
+    a per-request override is that the request can pick an
+    available mode the deployment supports but does not
+    default to. The current rule is the right one: the
+    override is rejected only when the requested mode is
+    structurally impossible (chorus without a chorus
+    endpoint), not when it merely differs from the default.
+- **Mechanical scope:**
+  - `src/config/overrides.ts`: new module. Exports
+    `parseRequestOverrides(headers, chorusConfig)` and
+    `formatRejectedHeader(rejected)`. Parsing is
+    case-insensitive on header values, trims whitespace, and
+    silently ignores empty-after-trim values (more likely a
+    client bug than a deliberate signal).
+  - `src/server.ts`: invokes the parser at the start of the
+    `POST /v1/chat/completions` handler, derives
+    `effectiveAnswerMode` and `effectiveTransparencyConfig`,
+    forwards them to `runPipeline`, and sets the
+    `x-turbocharger-override-rejected` response header when
+    relevant. `DecisionLogEntry` gains the three new fields.
+  - `test/overrides.test.ts`: ~12 unit tests covering each
+    valid value, each rejection path, case-insensitivity,
+    whitespace handling, the empty-string edge case, and the
+    rejected-header formatter.
+  - `test/pipeline-overrides.test.ts`: ~6 integration tests
+    that drive the full sidecar with `fetch`: transparency
+    override changes the visible output, silent override
+    suppresses a banner default, chorus override without
+    chorus config produces the right rejection header,
+    invalid header values continue the request with the
+    rejection visible, no-override requests are unchanged,
+    combined overrides work.
+- **Consequences for downstream issues:**
+  - Issue #15 (release): the README should mention the two
+    headers under "Configuration" so the v0.1 surface is
+    documented. CONFIGURATION.md should grow a "per-request
+    overrides" section.
+  - The `x-turbocharger-answer-mode` response header now
+    reflects the **effective** mode, not the configured
+    default. Anyone consuming that header in dashboards or
+    logs sees the truth of what ran, not the configured
+    intention.
+- **Related:** ADR-0021 (chorus is an AnswerMode, not an
+  escalation strategy), ADR-0022 (banner opt-in / silent
+  default), ADR-0023 (card structure), ADR-0024 (the static
+  configuration surface this layer sits on top of), brief
+  §5 ("Per-chat override"), brief §8 ("no silent fallbacks").
