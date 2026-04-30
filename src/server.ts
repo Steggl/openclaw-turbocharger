@@ -17,6 +17,7 @@ import { Hono } from 'hono';
 
 import { loadEnvConfig } from './config/env.js';
 import { loadConfig } from './config/load.js';
+import { formatRejectedHeader, parseRequestOverrides } from './config/overrides.js';
 import { runPipeline } from './pipeline.js';
 import { forwardChatCompletion } from './proxy.js';
 import type {
@@ -89,6 +90,7 @@ export interface AppDeps {
  */
 export interface DecisionLogEntry extends RequestLogEntry {
   readonly answer_mode?: AnswerMode;
+  readonly answer_mode_override?: AnswerMode;
   readonly decision?: OrchestratorDecision['kind'];
   readonly decision_reason?: string;
   readonly escalation_depth?: number;
@@ -97,6 +99,8 @@ export interface DecisionLogEntry extends RequestLogEntry {
   readonly chorus_outcome?: ChorusTrace['outcome'];
   readonly chorus_detail?: string;
   readonly transparency_mode?: TransparencyConfig['mode'];
+  readonly transparency_mode_override?: TransparencyConfig['mode'];
+  readonly override_rejected?: readonly string[];
 }
 
 const defaultLogger: RequestLogger = (entry) => {
@@ -136,6 +140,8 @@ export function createApp(deps: AppDeps): Hono {
     const start = Date.now();
     let status = 0;
     let answerMode: AnswerMode | undefined;
+    let answerModeOverride: AnswerMode | undefined;
+    let transparencyModeOverride: TransparencyConfig['mode'] | undefined;
     let decisionKind: OrchestratorDecision['kind'] | undefined;
     let decisionReason: string | undefined;
     let escalationDepth: number | undefined;
@@ -144,8 +150,25 @@ export function createApp(deps: AppDeps): Hono {
     let chorusOutcome: ChorusTrace['outcome'] | undefined;
     let chorusDetail: string | undefined;
 
+    // Parse per-request overrides (Issue #12). Invalid values do not
+    // fail the request; they are listed in `rejected` and surface on
+    // the response header so clients can detect what was ignored.
+    const overrides = parseRequestOverrides(c.req.raw.headers, deps.chorusConfig);
+    const effectiveAnswerMode: AnswerMode = overrides.answerMode ?? defaultAnswerMode;
+    const effectiveTransparencyConfig: TransparencyConfig | undefined =
+      overrides.transparencyMode !== undefined
+        ? { mode: overrides.transparencyMode }
+        : deps.transparencyConfig;
+    if (overrides.answerMode !== undefined) {
+      answerModeOverride = overrides.answerMode;
+    }
+    if (overrides.transparencyMode !== undefined) {
+      transparencyModeOverride = overrides.transparencyMode;
+    }
+    const rejectedHeaderValue = formatRejectedHeader(overrides.rejected);
+
     try {
-      if (defaultAnswerMode === 'chorus') {
+      if (effectiveAnswerMode === 'chorus') {
         // Chorus mode: orchestratorConfig is not required; pipeline
         // dispatches directly to the chorus endpoint.
         answerMode = 'chorus';
@@ -164,6 +187,9 @@ export function createApp(deps: AppDeps): Hono {
             chorusDetail = result.trace.detail;
           }
         }
+        if (rejectedHeaderValue !== null) {
+          result.response.headers.set('x-turbocharger-override-rejected', rejectedHeaderValue);
+        }
         return result.response;
       }
 
@@ -178,8 +204,8 @@ export function createApp(deps: AppDeps): Hono {
           ...(deps.escalationConfig !== undefined
             ? { escalationConfig: deps.escalationConfig }
             : {}),
-          ...(deps.transparencyConfig !== undefined
-            ? { transparencyConfig: deps.transparencyConfig }
+          ...(effectiveTransparencyConfig !== undefined
+            ? { transparencyConfig: effectiveTransparencyConfig }
             : {}),
         });
         status = result.response.status;
@@ -194,12 +220,18 @@ export function createApp(deps: AppDeps): Hono {
             escalationPath = result.trace.path;
           }
         }
+        if (rejectedHeaderValue !== null) {
+          result.response.headers.set('x-turbocharger-override-rejected', rejectedHeaderValue);
+        }
         return result.response;
       }
 
       // No orchestrator, pass-through proxy (issue #2).
       const downstream = await forwardChatCompletion(c.req.raw, deps.proxyTarget);
       status = downstream.status;
+      if (rejectedHeaderValue !== null) {
+        downstream.headers.set('x-turbocharger-override-rejected', rejectedHeaderValue);
+      }
       return downstream;
     } catch (err) {
       status = 502;
@@ -221,6 +253,9 @@ export function createApp(deps: AppDeps): Hono {
         status,
         latency_ms: Date.now() - start,
         ...(answerMode !== undefined ? { answer_mode: answerMode } : {}),
+        ...(answerModeOverride !== undefined
+          ? { answer_mode_override: answerModeOverride }
+          : {}),
         ...(decisionKind !== undefined ? { decision: decisionKind } : {}),
         ...(decisionReason !== undefined ? { decision_reason: decisionReason } : {}),
         ...(escalationDepth !== undefined ? { escalation_depth: escalationDepth } : {}),
@@ -228,8 +263,18 @@ export function createApp(deps: AppDeps): Hono {
         ...(escalationPath !== undefined ? { escalation_path: escalationPath } : {}),
         ...(chorusOutcome !== undefined ? { chorus_outcome: chorusOutcome } : {}),
         ...(chorusDetail !== undefined ? { chorus_detail: chorusDetail } : {}),
-        ...(deps.transparencyConfig !== undefined
-          ? { transparency_mode: deps.transparencyConfig.mode }
+        ...(effectiveTransparencyConfig !== undefined
+          ? { transparency_mode: effectiveTransparencyConfig.mode }
+          : {}),
+        ...(transparencyModeOverride !== undefined
+          ? { transparency_mode_override: transparencyModeOverride }
+          : {}),
+        ...(overrides.rejected.length > 0
+          ? {
+              override_rejected: overrides.rejected.map(
+                (r) => `${r.field}=${r.value}:${r.reason}`,
+              ),
+            }
           : {}),
       };
       log(entry);
