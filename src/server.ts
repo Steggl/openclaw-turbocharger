@@ -253,9 +253,7 @@ export function createApp(deps: AppDeps): Hono {
         status,
         latency_ms: Date.now() - start,
         ...(answerMode !== undefined ? { answer_mode: answerMode } : {}),
-        ...(answerModeOverride !== undefined
-          ? { answer_mode_override: answerModeOverride }
-          : {}),
+        ...(answerModeOverride !== undefined ? { answer_mode_override: answerModeOverride } : {}),
         ...(decisionKind !== undefined ? { decision: decisionKind } : {}),
         ...(decisionReason !== undefined ? { decision_reason: decisionReason } : {}),
         ...(escalationDepth !== undefined ? { escalation_depth: escalationDepth } : {}),
@@ -271,9 +269,7 @@ export function createApp(deps: AppDeps): Hono {
           : {}),
         ...(overrides.rejected.length > 0
           ? {
-              override_rejected: overrides.rejected.map(
-                (r) => `${r.field}=${r.value}:${r.reason}`,
-              ),
+              override_rejected: overrides.rejected.map((r) => `${r.field}=${r.value}:${r.reason}`),
             }
           : {}),
       };

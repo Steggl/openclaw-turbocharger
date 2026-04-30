@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  formatRejectedHeader,
-  parseRequestOverrides,
-} from '../src/config/overrides.js';
+import { formatRejectedHeader, parseRequestOverrides } from '../src/config/overrides.js';
 import type { ChorusConfig } from '../src/types.js';
 
 const chorusConfigured: ChorusConfig = {
@@ -126,9 +123,7 @@ describe('formatRejectedHeader', () => {
 
   it('renders one rejection as field=value:reason', () => {
     expect(
-      formatRejectedHeader([
-        { field: 'answer-mode', value: 'dance', reason: 'invalid-value' },
-      ]),
+      formatRejectedHeader([{ field: 'answer-mode', value: 'dance', reason: 'invalid-value' }]),
     ).toBe('answer-mode=dance:invalid-value');
   });
 

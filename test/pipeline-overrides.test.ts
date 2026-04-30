@@ -1,9 +1,4 @@
-import {
-  createServer,
-  type IncomingMessage,
-  type Server,
-  type ServerResponse,
-} from 'node:http';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -79,9 +74,7 @@ function makeOrchestratorConfig(overrides: Partial<OrchestratorConfig> = {}): Or
   };
 }
 
-function makeEscalationConfig(
-  overrides: Partial<EscalationConfig> = {},
-): EscalationConfig {
+function makeEscalationConfig(overrides: Partial<EscalationConfig> = {}): EscalationConfig {
   return {
     mode: 'ladder',
     ladder: ['weak-model', 'mid-model', 'strong-model'],
@@ -131,11 +124,13 @@ describe('per-request header overrides (Issue #12)', () => {
     await mock.close();
   });
 
-  function startSidecar(opts: {
-    defaultAnswerMode?: 'single' | 'chorus';
-    chorusConfig?: ChorusConfig;
-    transparencyConfig?: TransparencyConfig;
-  } = {}): void {
+  function startSidecar(
+    opts: {
+      defaultAnswerMode?: 'single' | 'chorus';
+      chorusConfig?: ChorusConfig;
+      transparencyConfig?: TransparencyConfig;
+    } = {},
+  ): void {
     sidecar = startServer(
       { port: 0, downstreamBaseUrl: mock.baseUrl },
       {

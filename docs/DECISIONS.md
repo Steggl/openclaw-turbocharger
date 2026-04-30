@@ -1495,30 +1495,30 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
     whole request. Logging the rejection on a header is
     cheaper for everyone.
 - **Alternatives considered:**
-  - *Three headers including `X-Turbocharger-Escalation-Mode`
-    (ladder|max).* Rejected for the MVP. The escalation
+  - _Three headers including `X-Turbocharger-Escalation-Mode`
+    (ladder|max)._ Rejected for the MVP. The escalation
     strategy is a deployment-wide cost-vs-quality tradeoff,
     not a per-request choice the client can sensibly make. If
     a future use case appears, the same tolerant-with-reject
     machinery accommodates it without redesign.
-  - *HTTP 400 on invalid value.* Rejected per "Rationale"
+  - _HTTP 400 on invalid value._ Rejected per "Rationale"
     above — the cost of refusing the request outweighs the
     benefit of a slightly louder failure signal.
-  - *Silent ignore of invalid values.* Rejected as a brief
+  - _Silent ignore of invalid values._ Rejected as a brief
     violation: silent fallbacks are exactly the failure mode
     §8 calls out.
-  - *JSON-structured `x-turbocharger-override-rejected`
-    header* (e.g. `[{"field":"transparency",…}]`). Rejected:
+  - _JSON-structured `x-turbocharger-override-rejected`
+    header_ (e.g. `[{"field":"transparency",…}]`). Rejected:
     response headers are line-oriented, JSON inside one header
     is awkward to read in `curl -v` and tools like nginx
     access logs typically truncate at commas anyway. The
     `field=value:reason` form parses with one `split(", ")`
     and one `split("=")`/`split(":")` pair per entry.
-  - *Allow override of `defaultAnswerMode` only when the
+  - _Allow override of `defaultAnswerMode` only when the
     overriding value matches what is configured (i.e. accept
     `single` if defaultAnswerMode is single; accept `chorus`
     only if a chorus is configured AND defaultAnswerMode is
-    chorus).* Rejected as too restrictive. The whole point of
+    chorus)._ Rejected as too restrictive. The whole point of
     a per-request override is that the request can pick an
     available mode the deployment supports but does not
     default to. The current rule is the right one: the
