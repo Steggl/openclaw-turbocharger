@@ -7,8 +7,9 @@ How an `openclaw-turbocharger` release is assembled and published.
 PR-A introduced this runbook with the planned five-step sequence.
 PR-B expanded step 4 (npm publish) with the verified flow,
 including the `prepublishOnly` hook and the `npm pack --dry-run`
-pre-flight. The Docker section will be expanded in PR-C once the
-image build is wired up.
+pre-flight. PR-C expanded step 5 (Docker image) with the
+multi-stage build, the local smoke test, and dual-registry push
+(Docker Hub plus GHCR). All five steps now have concrete commands.
 
 ## Planned release sequence
 
@@ -55,10 +56,57 @@ image build is wired up.
    scoped `@steggl/...` namespace publishes publicly without
    `--access public` on every invocation.
 
-5. **Docker image.** `docker build` from the repository root, tagged
-   as `ghcr.io/steggl/openclaw-turbocharger:X.Y.Z`. The `:latest` tag
-   is only pushed for stable releases; pre-releases use only the
-   explicit version tag.
+5. **Docker image.** Pre-flight: build and smoke-test locally.
+
+   ```bash
+   docker build -t openclaw-turbocharger:smoke .
+
+   docker run -d --rm --name turbocharger-smoke \
+     -p 11435:11435 \
+     -e TURBOCHARGER_DOWNSTREAM_BASE_URL=http://localhost:9999 \
+     openclaw-turbocharger:smoke
+
+   sleep 3
+
+   docker ps --filter name=turbocharger-smoke --format '{{.Status}}'
+   docker logs turbocharger-smoke
+   nc -zv localhost 11435 2>&1 | head -1
+
+   docker stop turbocharger-smoke
+   ```
+
+   The smoke test confirms three things: the image builds without
+   error, the container stays alive past the startup window, and
+   the configured port is bound. The dummy `localhost:9999`
+   downstream URL is intentional — the sidecar should start
+   regardless of whether the downstream is reachable; that
+   contract gets verified here.
+
+   Tag and push to both registries.
+
+   ```bash
+   echo "$GITHUB_TOKEN" | docker login ghcr.io -u steggl --password-stdin
+   docker login --username steggl
+
+   VERSION=X.Y.Z
+
+   docker build \
+     --label org.opencontainers.image.version="$VERSION" \
+     -t openclaw-turbocharger:"$VERSION" .
+
+   docker tag openclaw-turbocharger:"$VERSION" \
+     ghcr.io/steggl/openclaw-turbocharger:"$VERSION"
+   docker push ghcr.io/steggl/openclaw-turbocharger:"$VERSION"
+
+   docker tag openclaw-turbocharger:"$VERSION" \
+     steggl/openclaw-turbocharger:"$VERSION"
+   docker push steggl/openclaw-turbocharger:"$VERSION"
+   ```
+
+   The `:latest` tag is pushed only for stable releases (no
+   `-alpha`, `-beta`, or `-rc` suffix). Pre-releases use only the
+   explicit version tag so `docker pull steggl/openclaw-turbocharger`
+   keeps resolving to the latest stable when one exists.
 
 ## Versioning policy
 
@@ -73,8 +121,6 @@ image build is wired up.
 
 ## Out of scope for this stub
 
-- **Exact `Dockerfile` build context, image base, and registry push
-  commands.** Lands with PR-C (Docker plumbing) of issue #15.
 - **Automated release workflow** (GitHub Actions on tag push).
   Optional follow-up after the manual release path is documented and
   proven on at least one real release.

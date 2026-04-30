@@ -1,0 +1,56 @@
+# Version control.
+.git
+.gitignore
+.gitattributes
+
+# Editor and IDE state.
+.idea
+.vscode
+.editorconfig
+
+# Build artifacts (rebuilt inside the container).
+dist
+*.tsbuildinfo
+
+# Dependencies (installed inside the container).
+node_modules
+
+# Test files (the runtime image does not run vitest).
+test
+coverage
+.nyc_output
+vitest.config.ts
+
+# Project documentation (does not need to be in the image).
+docs
+README.md
+CHANGELOG.md
+CONTRIBUTING.md
+LICENSE
+PROJECT_BRIEF.md
+
+# Examples.
+examples
+
+# CI and project meta.
+.github
+
+# Linting and formatting (only used in the host workflow).
+eslint.config.js
+.prettierrc
+.prettierignore
+
+# Unrelated package metadata.
+openclaw.plugin.json
+
+# Logs and OS junk.
+*.log
+.DS_Store
+Thumbs.db
+
+# Docker itself.
+Dockerfile
+.dockerignore
+
+# Node version pin (used by host's nvm/asdf, irrelevant inside the image).
+.nvmrc

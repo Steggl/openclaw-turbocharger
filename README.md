@@ -209,8 +209,18 @@ TURBOCHARGER_DOWNSTREAM_BASE_URL=http://localhost:11434/v1 \
 The package is also importable from a Node application for embedded
 use; see the named exports of `@steggl/openclaw-turbocharger`.
 
-For Docker deployments, see [`docs/RELEASING.md`](./docs/RELEASING.md)
-once the Docker image is published in PR-C of issue #15.
+For Docker deployments, the image is published on Docker Hub and
+GHCR:
+
+```bash
+docker run -p 11435:11435 \
+  -e TURBOCHARGER_DOWNSTREAM_BASE_URL=http://your-llm-host:11434/v1 \
+  steggl/openclaw-turbocharger:0.1.0-alpha.0
+```
+
+Replace `steggl/...` with `ghcr.io/steggl/...` to pull from GHCR
+instead. See [`docs/RELEASING.md`](./docs/RELEASING.md) for the
+build and publish flow.
 
 ## Configuration
 
