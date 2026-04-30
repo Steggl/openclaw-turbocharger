@@ -3,12 +3,13 @@
 > A sidecar that decides between running one model carefully and asking
 > several at once. For OpenClaw and any OpenAI-compatible client.
 
-**Status:** in-progress implementation. 11 of 15 MVP issues merged. The
-proxy, adequacy detectors, LLM-critic, orchestrator, pipeline, ladder
-escalation, max escalation, chorus dispatch stub, the transparency
-banner and card, and the Zod-validated config loader are all in place.
-Per-request overrides, the doc finalization round, and the first
-published release are still pending. No published release yet.
+**Status:** all 15 MVP issues merged. The proxy, adequacy detectors,
+LLM-critic, orchestrator, pipeline, ladder and max escalation,
+chorus dispatch, transparency banner and card, the Zod-validated
+config loader, and per-request header overrides are all in place.
+v0.1.0-alpha is being cut — see [`CHANGELOG.md`](./CHANGELOG.md)
+for the release notes and [`docs/RELEASING.md`](./docs/RELEASING.md)
+for how the release is assembled.
 
 openclaw-turbocharger fills the gap between "one cheap model for everything"
 and "one expensive model for everything." It runs whichever model you
@@ -99,6 +100,19 @@ so far, in order:
     misconfiguration in one error message. See
     [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md) and
     [ADR-0024](./docs/DECISIONS.md).
+12. **#12 `config:per-request-override`** — header-based per-request
+    overrides for answer mode and transparency mode
+    (`X-Turbocharger-Answer-Mode`, `X-Turbocharger-Transparency`),
+    layered on top of the static configuration. Invalid values are
+    rejected and reported on a `x-turbocharger-override-rejected`
+    response header rather than silently falling through. See
+    [ADR-0025](./docs/DECISIONS.md).
+13. **#13 + #14 `docs:readme` + `docs:comparison`** — full README,
+    `docs/COMPARISON.md`, `docs/CONFIGURATION.md`,
+    `docs/ARCHITECTURE.md`, and `CONTRIBUTING.md` polish to
+    release-ready state, including the `Two answer modes` section
+    and the configuration overview. Documentation tracks the code
+    rather than trailing it.
 
 ## Transparency
 
@@ -153,13 +167,22 @@ banner and card respectively, and
 [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md) for the
 configuration shape.
 
-## What lands next
+## What's next
 
-1. **#12 `config:per-request-override`** — header-based per-request
-   overrides (`X-Turbocharger-Answer-Mode`, `X-Turbocharger-Transparency`,
-   …) on top of the static configuration loaded from env and file.
-2. **#15 `release:v0.1.0-alpha`** — first published version. Brings
-   the npm package, the ClawHub manifest, and a Docker image.
+The MVP is complete. Post-v0.1.0-alpha work is tracked in the issue
+tracker on GitHub. Notable items:
+
+- **#22 `plugin-sdk`** — native OpenClaw plugin adapter and an entry
+  on `plugins/community.md`. v0.1.0-alpha ships as a standalone
+  OpenAI-compatible HTTP sidecar; OpenClaw users can already
+  configure it as a custom provider URL. #22 adds first-class plugin
+  integration via the OpenClaw plugin SDK so that
+  `openclaw plugins install @steggl/openclaw-turbocharger` works
+  end-to-end.
+
+See [`CHANGELOG.md`](./CHANGELOG.md) for the v0.1.0-alpha.0 release
+notes and [`docs/RELEASING.md`](./docs/RELEASING.md) for how releases
+are assembled.
 
 ## Configuration
 
@@ -235,13 +258,13 @@ YAML/JSON-Datei (Pfad aus `TURBOCHARGER_CONFIG`); env-Werte
 überschreiben Datei-Werte. Validierungsfehler werden gesammelt und
 mit vollem Pfad-Kontext gemeldet.
 
-Stand: laufende Implementierung, 11 von 15 MVP-Issues gemerged.
-Proxy, Adäquanz-Detektoren, LLM-Kritiker, Orchestrator, Pipeline,
-Ladder- und Max-Eskalation, Chorus-Dispatch, Banner- und
-Card-Transparenz sowie der Zod-validierte Config-Loader sind
-fertig. Per-Request-Overrides, finale Doku-Runde und das erste
-Release stehen noch aus. Es gibt noch kein veröffentlichtes
-Release.
+Stand: alle 15 MVP-Issues gemerged. Proxy, Adäquanz-Detektoren,
+LLM-Kritiker, Orchestrator, Pipeline, Ladder- und Max-Eskalation,
+Chorus-Dispatch, Banner- und Card-Transparenz, der Zod-validierte
+Config-Loader und Per-Request-Header-Overrides sind alle fertig.
+v0.1.0-alpha wird vorbereitet — siehe [`CHANGELOG.md`](./CHANGELOG.md)
+für die Release-Notes und [`docs/RELEASING.md`](./docs/RELEASING.md)
+für den Release-Ablauf.
 
 ## License
 
