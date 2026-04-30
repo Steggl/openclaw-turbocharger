@@ -102,6 +102,17 @@ First published alpha release. All 15 MVP issues from `PROJECT_BRIEF.md`
   loader follows 12-factor precedence and works with immutable
   container images.
 
+### Distribution
+
+- **npm** — published as `@steggl/openclaw-turbocharger` on the npm
+  registry under the `alpha` dist-tag. Includes a CLI binary
+  (`openclaw-turbocharger`) so the package is usable directly via
+  `npx @steggl/openclaw-turbocharger` without cloning the repo.
+- **Docker** — published as `steggl/openclaw-turbocharger` on
+  Docker Hub and `ghcr.io/steggl/openclaw-turbocharger` on GHCR.
+  Multi-stage build on `node:22-alpine`, runs as the non-root
+  `node` user, exposes port 11435.
+
 ### Out of scope for v0.1.0-alpha
 
 - **Native OpenClaw plugin integration** is tracked as #22 for a later
