@@ -184,6 +184,34 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for the v0.1.0-alpha.0 release
 notes and [`docs/RELEASING.md`](./docs/RELEASING.md) for how releases
 are assembled.
 
+## Install
+
+`openclaw-turbocharger` is published on npm as a scoped package and
+installs a single binary, `openclaw-turbocharger`, that runs the
+sidecar.
+
+Run it directly without installing globally:
+
+```bash
+TURBOCHARGER_DOWNSTREAM_BASE_URL=http://localhost:11434/v1 \
+  npx @steggl/openclaw-turbocharger
+```
+
+Or install once and use the `openclaw-turbocharger` command:
+
+```bash
+npm install -g @steggl/openclaw-turbocharger
+
+TURBOCHARGER_DOWNSTREAM_BASE_URL=http://localhost:11434/v1 \
+  openclaw-turbocharger
+```
+
+The package is also importable from a Node application for embedded
+use; see the named exports of `@steggl/openclaw-turbocharger`.
+
+For Docker deployments, see [`docs/RELEASING.md`](./docs/RELEASING.md)
+once the Docker image is published in PR-C of issue #15.
+
 ## Configuration
 
 The sidecar reads configuration from three sources, in order of
@@ -265,6 +293,10 @@ Config-Loader und Per-Request-Header-Overrides sind alle fertig.
 v0.1.0-alpha wird vorbereitet — siehe [`CHANGELOG.md`](./CHANGELOG.md)
 für die Release-Notes und [`docs/RELEASING.md`](./docs/RELEASING.md)
 für den Release-Ablauf.
+
+Installation: `npx @steggl/openclaw-turbocharger` oder
+`npm install -g @steggl/openclaw-turbocharger` und dann
+`openclaw-turbocharger` aufrufen.
 
 ## License
 

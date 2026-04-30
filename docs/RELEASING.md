@@ -4,10 +4,11 @@ How an `openclaw-turbocharger` release is assembled and published.
 
 ## Status
 
-Stub — landed as part of PR-A of issue #15. Will be expanded in PR-C
-once the npm publish plumbing and Docker image build are wired up.
-Below is the planned sequence; the final document will include exact
-commands, prerequisite checks, and rollback steps for each step.
+PR-A introduced this runbook with the planned five-step sequence.
+PR-B expanded step 4 (npm publish) with the verified flow,
+including the `prepublishOnly` hook and the `pnpm pack --dry-run`
+pre-flight. The Docker section will be expanded in PR-C once the
+image build is wired up.
 
 ## Planned release sequence
 
@@ -25,11 +26,34 @@ commands, prerequisite checks, and rollback steps for each step.
    `*-alpha`, `*-beta`, or `*-rc` version. Auto-generated release
    notes are appended below the manual notes for completeness, not
    used as a substitute.
-4. **npm publish.** `pnpm publish --access public` with the
-   appropriate dist-tag. Pre-releases use `--tag alpha` (or `beta`,
-   `rc`) so that `npm install @steggl/openclaw-turbocharger` keeps
-   resolving to the latest stable when one exists. The first
-   non-pre-release version will set the `latest` dist-tag.
+4. **npm publish.** Pre-flight: verify the tarball contents.
+
+   ```bash
+   pnpm pack --dry-run
+   ```
+
+   Should match the `files` allowlist in `package.json`: `dist/`,
+   `README.md`, `LICENSE`, `CHANGELOG.md`. Any other path appearing
+   in the dry-run output is a misconfiguration of the allowlist
+   and should be fixed before publishing.
+
+   Publish:
+
+   ```bash
+   pnpm publish --tag alpha
+   ```
+
+   `--tag alpha` keeps `npm install @steggl/openclaw-turbocharger`
+   resolving to the latest stable when one exists. Without `--tag`,
+   npm uses `latest` by default; the first non-pre-release version
+   will be published without `--tag` so `latest` claims it.
+
+   The `prepublishOnly` script in `package.json` runs `pnpm check:ci`
+   first (lint, format check, typecheck, test, build); if anything
+   is broken, no artifact is pushed to npm. Public access is
+   declared via `publishConfig.access` in `package.json`, so the
+   scoped `@steggl/...` namespace publishes publicly without
+   `--access public` on every invocation.
 5. **Docker image.** `docker build` from the repository root, tagged
    as `ghcr.io/steggl/openclaw-turbocharger:X.Y.Z`. The `:latest` tag
    is only pushed for stable releases; pre-releases use only the
@@ -48,8 +72,6 @@ commands, prerequisite checks, and rollback steps for each step.
 
 ## Out of scope for this stub
 
-- **Exact `pnpm publish` invocation and `npm` access setup.** Lands
-  with PR-B (npm plumbing) of issue #15.
 - **Exact `Dockerfile` build context, image base, and registry push
   commands.** Lands with PR-C (Docker plumbing) of issue #15.
 - **Automated release workflow** (GitHub Actions on tag push).

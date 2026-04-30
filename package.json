@@ -36,11 +36,18 @@
       "import": "./dist/server.js"
     }
   },
+  "bin": {
+    "openclaw-turbocharger": "./dist/server.js"
+  },
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "tsup --watch",
     "build": "tsup",
@@ -52,7 +59,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "pnpm format && pnpm lint:fix && pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build",
-    "check:ci": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build"
+    "check:ci": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build",
+    "prepublishOnly": "pnpm check:ci"
   },
   "devDependencies": {
     "@eslint/js": "^9.15.0",
