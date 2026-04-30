@@ -108,7 +108,7 @@ First published alpha release. All 15 MVP issues from `PROJECT_BRIEF.md`
   release. v0.1.0-alpha ships as a standalone OpenAI-compatible HTTP
   sidecar; OpenClaw users can configure it as a custom provider URL.
   When #22 lands, `openclaw plugins install
-  @steggl/openclaw-turbocharger` will work end-to-end and the project
+@steggl/openclaw-turbocharger` will work end-to-end and the project
   will be submitted to the openclaw/docs `plugins/community.md` listing.
 - **Streaming response transparency annotations** (per ADR-0013).
   Banner and card mode apply only to non-streaming responses.
