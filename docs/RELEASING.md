@@ -6,7 +6,7 @@ How an `openclaw-turbocharger` release is assembled and published.
 
 PR-A introduced this runbook with the planned five-step sequence.
 PR-B expanded step 4 (npm publish) with the verified flow,
-including the `prepublishOnly` hook and the `pnpm pack --dry-run`
+including the `prepublishOnly` hook and the `npm pack --dry-run`
 pre-flight. The Docker section will be expanded in PR-C once the
 image build is wired up.
 
@@ -29,7 +29,7 @@ image build is wired up.
 4. **npm publish.** Pre-flight: verify the tarball contents.
 
    ```bash
-   pnpm pack --dry-run
+   npm pack --dry-run
    ```
 
    Should match the `files` allowlist in `package.json`: `dist/`,
@@ -54,6 +54,7 @@ image build is wired up.
    declared via `publishConfig.access` in `package.json`, so the
    scoped `@steggl/...` namespace publishes publicly without
    `--access public` on every invocation.
+
 5. **Docker image.** `docker build` from the repository root, tagged
    as `ghcr.io/steggl/openclaw-turbocharger:X.Y.Z`. The `:latest` tag
    is only pushed for stable releases; pre-releases use only the
