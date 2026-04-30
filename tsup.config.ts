@@ -9,6 +9,9 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   minify: false,
+  // Shebang for direct CLI invocation when installed via `npm install -g`
+  // or `npx`. The `bin` field in package.json points at this output.
+  banner: { js: '#!/usr/bin/env node' },
   // Declarations are generated using the build-specific tsconfig, which sets
   // noEmit: false and declaration: true. The root tsconfig.json stays
   // emit-less for editor / `tsc --noEmit` typechecking. See
