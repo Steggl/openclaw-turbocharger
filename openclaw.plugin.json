@@ -1,7 +1,5 @@
 {
-  "_note_1": "PLACEHOLDER MANIFEST — populated for real in issue #15 (release v0.1.0-alpha).",
-  "_note_2": "Schema source not confirmed. Web search during scaffold surfaced a consistent field pattern (required: `id`, `configSchema`; optional: `kind`, `channels`, `providers`, `skills`, `name`, `description`) across several doc mirrors, but no single primary source (e.g. an official github.com/openclaw repo) was verified. Will verify in issue #15 before publishing.",
-  "_note_3": "Candidate sources to re-check: https://docs.openclaw.ai/tools/plugin ; deepwiki.com/openclaw/docs ; docs.claw.so/engine/plugins/manifest .",
-  "id": "turbocharger-placeholder",
-  "configSchema": {}
+  "_note_1": "TODO marker — not a real OpenClaw plugin manifest. v0.1.0-alpha ships openclaw-turbocharger as a standalone OpenAI-compatible HTTP sidecar; the runtime adapter required for `openclaw plugins install` is not implemented in this version.",
+  "_note_2": "Tracked as issue #22. The verified plugin manifest schema is documented at https://docs.openclaw.ai/plugins/manifest.md (required: `id`, `configSchema`; optional: `kind`, `channels`, `providers`, `skills`, `name`, `description`, `uiHints`, `version`).",
+  "_note_3": "OpenClaw users today: configure turbocharger as a custom OpenAI-compatible provider pointing at the sidecar's HTTP port. See README.md `Configuration` section."
 }

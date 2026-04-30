@@ -1,6 +1,6 @@
 {
   "name": "@steggl/openclaw-turbocharger",
-  "version": "0.0.1",
+  "version": "0.1.0-alpha.0",
   "description": "Reactive model escalation sidecar for OpenClaw and any OpenAI-compatible client. Runs a default model first, escalates to a stronger one only when adequacy signals say it didn't hold up, and surfaces the escalation to the user.",
   "keywords": [
     "openclaw",
