@@ -52,6 +52,12 @@ with crypto-payment flows or token-based payment rails that conflict
 with MiCA, DSGVO, or typical enterprise procurement. This is a
 deployment concern, not a code-quality judgement.
 
+For `openclaw-turbocharger` specifically, the deployment shape is
+now defined: a Zod-validated YAML or JSON config file (path from
+`TURBOCHARGER_CONFIG`) with per-field environment-variable
+overrides. Configuration errors are aggregated and reported with
+full path context — see [`CONFIGURATION.md`](./CONFIGURATION.md).
+
 ## Per-project notes
 
 ### ClawRouter (BlockRunAI)

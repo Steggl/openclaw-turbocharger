@@ -3,12 +3,12 @@
 > A sidecar that decides between running one model carefully and asking
 > several at once. For OpenClaw and any OpenAI-compatible client.
 
-**Status:** in-progress implementation. 9 of 15 MVP issues merged. The
+**Status:** in-progress implementation. 11 of 15 MVP issues merged. The
 proxy, adequacy detectors, LLM-critic, orchestrator, pipeline, ladder
-escalation, max escalation, chorus dispatch stub, and the transparency
-banner are all in place. Card transparency, config schema, per-request
-overrides, the doc finalization round, and the first published release
-are still pending. No published release yet.
+escalation, max escalation, chorus dispatch stub, the transparency
+banner and card, and the Zod-validated config loader are all in place.
+Per-request overrides, the doc finalization round, and the first
+published release are still pending. No published release yet.
 
 openclaw-turbocharger fills the gap between "one cheap model for everything"
 and "one expensive model for everything." It runs whichever model you
@@ -85,6 +85,20 @@ so far, in order:
    happened in single mode. Banner mode is opt-in; the technical
    default is silent. See [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md)
    and [ADR-0022](./docs/DECISIONS.md).
+10. **#10 `transparency:card`** — opt-in structured Markdown card as a
+    third transparency mode alongside `silent` and `banner`. Surfaces
+    the full decision context (initial model, decision kind, signals,
+    aggregate, escalation path, outcome) under a distinct
+    `[turbocharger card]` marker. Locale-aware structural labels
+    (en/de); values stay English. See [ADR-0023](./docs/DECISIONS.md).
+11. **#11 `config:schema`** — Zod-validated configuration loader
+    accepting YAML or JSON files via `TURBOCHARGER_CONFIG`,
+    environment-variable overrides via `TURBOCHARGER_*` (with `__`
+    for nesting and `,` for arrays), and hard-coded defaults.
+    Validation errors are aggregated so operators see every
+    misconfiguration in one error message. See
+    [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md) and
+    [ADR-0024](./docs/DECISIONS.md).
 
 ## Transparency
 
@@ -92,10 +106,14 @@ The transparency layer is opt-in. By default the sidecar reports
 escalation decisions on response headers (`x-turbocharger-decision`,
 `x-turbocharger-escalation-stopped`, `x-turbocharger-escalation-path`,
 …) and as structured log fields, but does not modify the response
-body. To make escalation events visible to end users, set
-`transparencyConfig.mode` to `banner`. Once opted in, an
-`[turbocharger]` annotation precedes the assistant content whenever
-escalation or skipped-with-reason happened:
+body. Two body-mutating modes are available: a single-line banner
+or a structured card. Both are locale-aware (en/de) and both prefix
+their output with a marker so clients can strip transparency
+annotations without ambiguity.
+
+Set `transparencyConfig.mode` to `banner` for a one-sentence
+annotation prepended to the assistant content whenever escalation
+or skipped-with-reason happened:
 
 ```
 [turbocharger] A stronger model was used because the first answer
@@ -104,27 +122,76 @@ looked incomplete. The answer below is from the stronger model.
 <original assistant content>
 ```
 
-The banner is locale-aware: `en-*` (default) and `de-*`. Other
-locales fall through to English. The phrasing is deliberately
-vague — "looked incomplete" rather than "was wrong" — because the
-adequacy critic flags signals, not proven inadequacy. See ADR-0022
-for the full reasoning.
+Set `transparencyConfig.mode` to `card` for the full decision
+context — initial model, decision kind plus reason, signals with
+their confidences, aggregate score, escalation path, and outcome:
 
-The card transparency mode (#10) will offer a more structured
-multi-line view as a third option alongside `silent` and `banner`.
+```
+[turbocharger card]
+- Initial model: weak-model
+- Decision: escalate (hard_signals)
+- Signals: refusal (0.92)
+- Aggregate: 0.853
+- Path: weak-model → mid-model
+- Outcome: passed at depth 1
+
+---
+
+<original assistant content>
+```
+
+The phrasing is deliberately vague — "looked incomplete" rather
+than "was wrong" — because the adequacy critic flags signals, not
+proven inadequacy. Pass on the first try (`depth === 0`) produces
+no banner or card. Streaming responses (per ADR-0013) and
+chorus-mode responses (per ADR-0021) are exempt from the
+transparency layer regardless of this setting.
+
+See [ADR-0022](./docs/DECISIONS.md) and
+[ADR-0023](./docs/DECISIONS.md) for the design rationale of the
+banner and card respectively, and
+[`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md) for the
+configuration shape.
 
 ## What lands next
 
-1. **#10 `transparency:card`** — opt-in structured card view as an
-   alternative to the banner.
-2. **#11 `config:schema`** — Zod-validated config file shape merging
-   environment variables, file values, and defaults.
-3. **#12 `config:per-request-override`** — header-based per-request
+1. **#12 `config:per-request-override`** — header-based per-request
    overrides (`X-Turbocharger-Answer-Mode`, `X-Turbocharger-Transparency`,
-   …).
-4. **#13 / #14 `docs:readme` + `docs:comparison`** — final pass on the
-   README and the comparison document.
-5. **#15 `release:v0.1.0-alpha`** — first published version.
+   …) on top of the static configuration loaded from env and file.
+2. **#15 `release:v0.1.0-alpha`** — first published version. Brings
+   the npm package, the ClawHub manifest, and a Docker image.
+
+## Configuration
+
+The sidecar reads configuration from three sources, in order of
+descending precedence: environment variables, an optional
+YAML/JSON file (path from `TURBOCHARGER_CONFIG`), and hard-coded
+defaults. The minimum viable deployment sets one variable:
+
+```bash
+export TURBOCHARGER_DOWNSTREAM_BASE_URL=http://localhost:11434/v1
+node dist/server.js
+```
+
+For a full deployment with adequacy critic, ladder escalation, and
+banner transparency, write a YAML config (see
+[`examples/standalone-config.example.yaml`](./examples/standalone-config.example.yaml))
+and point `TURBOCHARGER_CONFIG` at it. Per-field environment
+variables follow the `TURBOCHARGER_PATH__SUBPATH=value` convention
+(double underscore for nesting, comma for primitive arrays):
+
+```bash
+export TURBOCHARGER_CONFIG=/etc/turbocharger.yaml
+export TURBOCHARGER_ESCALATION__LADDER=ollama/qwen2.5:7b,anthropic/claude-haiku-4-5
+export TURBOCHARGER_TRANSPARENCY__MODE=banner
+```
+
+Validation is aggregated — every problem is reported in one error
+message, with full dotted-path context, so operators can fix all
+of them in one edit. See
+[`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md) for the full
+field-by-field reference and [ADR-0024](./docs/DECISIONS.md) for
+the design.
 
 ## Development
 
@@ -158,16 +225,23 @@ Client und Modell-Provider, der zwei Antwort-Paradigmen unterstützt:
   nicht — Chorus ist selbst die Meta-Adäquanz-Logik.
 
 Eskalations-Ereignisse können über einen lokalisierten Banner
-(`mode: 'banner'`) im Antwort-Body sichtbar gemacht werden — opt-in,
-der technische Default ist `silent`. Banner-Texte sind in EN und DE
-verfügbar (Auswahl per `Accept-Language`).
+(`mode: 'banner'`) oder eine ausführlichere Card
+(`mode: 'card'`) im Antwort-Body sichtbar gemacht werden — opt-in,
+der technische Default ist `silent`. Banner- und Card-Texte sind in
+EN und DE verfügbar (Auswahl per `Accept-Language`).
 
-Stand: laufende Implementierung, 9 von 15 MVP-Issues gemerged. Proxy,
-Adäquanz-Detektoren, LLM-Kritiker, Orchestrator, Pipeline, Ladder-
-und Max-Eskalation, Chorus-Dispatch und Banner-Transparenz sind
-fertig. Card-Modus, Config-Schema, Per-Request-Overrides, finale
-Doku-Runde und das erste Release stehen noch aus. Es gibt noch kein
-veröffentlichtes Release.
+Die Konfiguration kommt aus Umgebungsvariablen und/oder einer
+YAML/JSON-Datei (Pfad aus `TURBOCHARGER_CONFIG`); env-Werte
+überschreiben Datei-Werte. Validierungsfehler werden gesammelt und
+mit vollem Pfad-Kontext gemeldet.
+
+Stand: laufende Implementierung, 11 von 15 MVP-Issues gemerged.
+Proxy, Adäquanz-Detektoren, LLM-Kritiker, Orchestrator, Pipeline,
+Ladder- und Max-Eskalation, Chorus-Dispatch, Banner- und
+Card-Transparenz sowie der Zod-validierte Config-Loader sind
+fertig. Per-Request-Overrides, finale Doku-Runde und das erste
+Release stehen noch aus. Es gibt noch kein veröffentlichtes
+Release.
 
 ## License
 
