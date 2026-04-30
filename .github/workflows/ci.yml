@@ -49,3 +49,57 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  docker-smoke:
+    name: Docker smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: openclaw-turbocharger:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run container
+        run: |
+          docker run -d --name turbocharger-smoke \
+            -p 11435:11435 \
+            -e TURBOCHARGER_DOWNSTREAM_BASE_URL=http://localhost:9999 \
+            openclaw-turbocharger:smoke
+
+          sleep 3
+
+          STATUS=$(docker inspect -f '{{.State.Status}}' turbocharger-smoke)
+          echo "Container status: $STATUS"
+          echo "=== Container logs ==="
+          docker logs turbocharger-smoke
+          echo "=== End logs ==="
+
+          if [ "$STATUS" != "running" ]; then
+            echo "::error::Container is not running (status: $STATUS)"
+            exit 1
+          fi
+
+      - name: Verify port is bound
+        run: |
+          if ! nc -zv -w 2 localhost 11435; then
+            echo "::error::Port 11435 not bound on the runner"
+            docker logs turbocharger-smoke
+            exit 1
+          fi
+          echo "Port 11435 bound — smoke test passed"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop turbocharger-smoke 2>/dev/null || true
+          docker rm turbocharger-smoke 2>/dev/null || true

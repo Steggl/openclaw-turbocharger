@@ -8,8 +8,10 @@ PR-A introduced this runbook with the planned five-step sequence.
 PR-B expanded step 4 (npm publish) with the verified flow,
 including the `prepublishOnly` hook and the `npm pack --dry-run`
 pre-flight. PR-C expanded step 5 (Docker image) with the
-multi-stage build, the local smoke test, and dual-registry push
-(Docker Hub plus GHCR). All five steps now have concrete commands.
+multi-stage build, a CI-verified smoke test (run on every PR
+via the `docker-smoke` job in `.github/workflows/ci.yml`), and
+dual-registry push (Docker Hub plus GHCR). All five steps now
+have concrete commands.
 
 ## Planned release sequence
 
@@ -56,7 +58,11 @@ multi-stage build, the local smoke test, and dual-registry push
    scoped `@steggl/...` namespace publishes publicly without
    `--access public` on every invocation.
 
-5. **Docker image.** Pre-flight: build and smoke-test locally.
+5. **Docker image.** Pre-flight: the build and smoke test run on
+   every PR via the `docker-smoke` job in
+   `.github/workflows/ci.yml`, so a green CI on `main` already
+   implies a working image. To reproduce the smoke test locally
+   (requires Docker installed):
 
    ```bash
    docker build -t openclaw-turbocharger:smoke .
