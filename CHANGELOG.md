@@ -8,7 +8,7 @@ project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
-## [0.1.0-alpha.0] — 2026-04-30
+## [0.1.0-alpha.0] — 2026-05-02
 
 First published alpha release. All 15 MVP issues from `PROJECT_BRIEF.md`
 §10 are merged.
