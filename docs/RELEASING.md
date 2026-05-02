@@ -13,6 +13,12 @@ via the `docker-smoke` job in `.github/workflows/ci.yml`), and
 dual-registry push (Docker Hub plus GHCR). All five steps now
 have concrete commands.
 
+Post-release, this document gained a "First-release gotchas"
+section capturing three rough edges encountered while shipping
+v0.1.0-alpha.0 — npm's first-publish dist-tag behaviour, the
+`gh` token's missing `write:packages` scope, and GHCR's
+default-private package visibility.
+
 ## Planned release sequence
 
 1. **Prerequisites.** `pnpm check` is green on `main`. The
@@ -125,7 +131,82 @@ have concrete commands.
   (`0.1.0-alpha.0`, `0.1.0-alpha.1`, …) so that the first published
   pre-release does not look like an afterthought.
 
-## Out of scope for this stub
+## First-release gotchas
+
+Three rough edges encountered while shipping v0.1.0-alpha.0. None
+of them break the release; they just don't behave the way step 4
+and step 5 of the sequence above suggest on first reading.
+
+### npm sets `latest` automatically on a package's first version
+
+**Symptom.** `pnpm publish --tag alpha` ships the version under
+the `alpha` dist-tag _and_ also under `latest`, even though
+`--tag alpha` was passed explicitly.
+
+**Cause.** The npm registry requires every package to have a
+`latest` dist-tag pointing somewhere. When a package has only one
+published version, npm has no choice but to point `latest` at it,
+regardless of `--tag`.
+
+**Workaround.** Accept it. `latest` will resolve correctly the
+moment a stable (non-pre-release) version is published without
+`--tag`, because npm will move `latest` to that version. Until
+then, `npm install @steggl/openclaw-turbocharger` resolves to the
+alpha; this is documented in the README.
+
+`npm dist-tag rm @steggl/openclaw-turbocharger latest` returns
+HTTP 400 while only one version exists — the registry refuses to
+leave the package without a `latest`.
+
+### `gh auth token` is missing `write:packages` for GHCR
+
+**Symptom.** `docker push ghcr.io/<user>/<image>:<tag>` fails
+with:
+
+```
+error from registry: permission_denied: The token provided does
+not match expected scopes.
+```
+
+**Cause.** `gh auth login` requests scopes
+`repo, read:org, gist, workflow` by default. GHCR push needs
+`write:packages`, which is not in that set.
+
+**Fix.** Add the missing scopes to the existing `gh` token, then
+re-issue the docker login:
+
+```bash
+gh auth refresh --scopes write:packages,read:packages,delete:packages
+
+docker logout ghcr.io
+gh auth token | docker login ghcr.io -u <user> --password-stdin
+```
+
+Verify with `gh auth status` that `write:packages` is now in the
+token's scope list before retrying the push.
+
+### GHCR new packages are private by default
+
+**Symptom.** After a successful `docker push` to GHCR, anonymous
+`docker pull` fails with `denied`, and the package's repository
+URL on github.com returns 404 even though the user account is
+public.
+
+**Cause.** GHCR creates new packages as private. Visibility has
+to be flipped manually after the first push; pushing under a
+public-repo's namespace does not propagate.
+
+**Fix.** Browser to
+`https://github.com/users/<user>/packages/container/<package>/settings`,
+scroll to the danger zone, "Change visibility" → Public, type
+the package name to confirm.
+
+After the toggle, the package is public immediately for anonymous
+`docker pull` from `ghcr.io`. The github.com web UI may still
+return 404 for ~5 minutes due to UI cache lag; an anonymous
+`docker pull` is the faster verification.
+
+## Deferred
 
 - **Automated release workflow** (GitHub Actions on tag push).
   Optional follow-up after the manual release path is documented and
