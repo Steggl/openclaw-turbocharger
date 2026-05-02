@@ -18,6 +18,7 @@
 //   - Weight application: issue #5.
 
 import type { DetectorInput, HardSignalDetector, Signal } from '../types.js';
+import { resolveLocale } from '../locale.js';
 
 // ---------------------------------------------------------------------------
 // Refusal
@@ -71,9 +72,14 @@ const REFUSAL_PATTERNS: Readonly<Record<string, readonly RefusalPattern[]>> = {
 };
 
 const DEFAULT_LOCALE = 'en';
+const REFUSAL_LOCALES = ['en', 'de'] as const;
 
 export const refusalDetector: HardSignalDetector = (input) => {
-  const locale = input.locale ?? DEFAULT_LOCALE;
+  // Resolve the request locale to one of the buckets we actually have
+  // patterns for. Without this resolver, `Accept-Language: de-DE` would
+  // miss the German bucket and fall through to English-only patterns.
+  // See ADR-0026 and issue #18.
+  const locale = resolveLocale(input.locale, REFUSAL_LOCALES, DEFAULT_LOCALE);
   const primary = REFUSAL_PATTERNS[locale] ?? REFUSAL_PATTERNS[DEFAULT_LOCALE] ?? [];
   // Also try English patterns as a fallback — non-English interactions
   // frequently surface English refusal phrasing from providers whose

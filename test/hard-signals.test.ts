@@ -93,6 +93,54 @@ describe('refusalDetector', () => {
     expect(signal).not.toBeNull();
   });
 
+  // Issue #18: BCP-47 region subtags must resolve to the bare-language
+  // bucket. Before the fix, `locale: 'de-DE'` missed the `de` patterns
+  // entirely and fell back to English, so a German-only refusal phrase
+  // went undetected.
+  it('resolves de-DE to the German bucket and detects a German-only refusal', () => {
+    const signal = refusalDetector(
+      makeInput({
+        response: 'Tut mir leid, aber ich kann dir nicht helfen.',
+        locale: 'de-DE',
+      }),
+    );
+    expect(signal).not.toBeNull();
+    expect(signal?.category).toBe('refusal');
+    expect(signal?.confidence).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it('resolves de_DE (underscore form) to the German bucket', () => {
+    const signal = refusalDetector(
+      makeInput({
+        response: 'Leider, aber ich kann dir nicht helfen.',
+        locale: 'de_DE',
+      }),
+    );
+    expect(signal).not.toBeNull();
+    expect(signal?.category).toBe('refusal');
+    expect(signal?.confidence).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it('treats locale matching as case-insensitive (DE-de resolves to de)', () => {
+    const signal = refusalDetector(
+      makeInput({
+        response: 'Leider, aber ich kann dir nicht helfen.',
+        locale: 'DE-de',
+      }),
+    );
+    expect(signal).not.toBeNull();
+    expect(signal?.confidence).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it('falls back to English when an unknown BCP-47 locale carries a region subtag', () => {
+    // fr-FR was not in REFUSAL_LOCALES at the time of writing; behaviour
+    // should mirror bare 'fr', not silently match some unrelated bucket.
+    const signal = refusalDetector(
+      makeInput({ response: "I'm sorry, but I cannot help with that.", locale: 'fr-FR' }),
+    );
+    expect(signal).not.toBeNull();
+  });
+
   it('reports the highest-confidence match when multiple patterns fire', () => {
     const signal = refusalDetector(
       makeInput({
