@@ -1565,3 +1565,93 @@ verdict.confidence >= threshold)`. A pass verdict never triggers
   default), ADR-0023 (card structure), ADR-0024 (the static
   configuration surface this layer sits on top of), brief
   §5 ("Per-chat override"), brief §8 ("no silent fallbacks").
+
+## ADR-0026: Locale resolution helper for BCP-47 prefix matching
+
+**Status:** accepted (issue #18)
+
+**Context.** The hard-signal `refusalDetector` (`src/critic/hard-signals.ts`)
+was looking up `REFUSAL_PATTERNS[input.locale]` directly, which matches
+only when the locale string is exactly one of the keys (`'en'` or `'de'`).
+Real-world clients send BCP-47 tags with region subtags
+(`Accept-Language: de-DE`, `de-AT`) and occasionally the legacy
+underscore form (`de_DE`); none of these matched the `de` bucket. The
+detector then fell back to English-only patterns, missing
+German-language refusals such as "Tut mir leid, ich kann dir nicht
+helfen". The bug was found while writing the German integration test
+for ADR-0023's transparency card and deferred to issue #18.
+
+The transparency layer (`src/transparency/banner.ts`,
+`src/transparency/card.ts`) had already solved the same problem with
+hand-rolled `resolveBannerLocale` and `resolveCardLocale` helpers. Both
+hard-code the `de` mapping and predate this ADR.
+
+**Decision.** Introduce a generic helper at `src/locale.ts`:
+
+```ts
+resolveLocale<L extends string>(
+  input: string | undefined,
+  allowed: readonly L[],
+  fallback: L,
+): L
+```
+
+The helper accepts any user-supplied locale string, lowercases it,
+and matches it against `allowed` using either exact match or a
+prefix-with-separator match (`-` or `_`). The longest matching
+prefix wins, so a future caller can list `['pt-BR', 'pt']` and have
+the regional bucket take precedence over the bare-language bucket
+when the input matches it. With the current `['en', 'de']` callers,
+the longest-prefix tie-breaking is dormant but free.
+
+Use the helper in `refusalDetector` only. The transparency-layer
+resolvers stay where they are.
+
+**Consequences.**
+
+- `Accept-Language: de-DE` (and `de_DE`, `DE`, `de-CH`, etc.) now
+  resolves to the German pattern bucket, restoring the locale-keyed
+  detection that was originally intended.
+- The English fallback inside `refusalDetector` (always trying
+  English patterns in addition to the resolved locale) is preserved.
+  Resolution determines which bucket is "primary"; the English
+  fallback is unaffected.
+- New locale-keyed tables anywhere in `src/critic/` should reach for
+  `resolveLocale`, not write a fresh resolver.
+- Adding a new locale to the refusal patterns requires two changes:
+  add the bucket to `REFUSAL_PATTERNS`, add the key to
+  `REFUSAL_LOCALES`. The `as const` ensures TypeScript fails the
+  build if the two go out of sync.
+
+**Alternatives considered.**
+
+1. _Inline the prefix logic in `refusalDetector`._ Smaller diff but
+   leaves the fix non-reusable. The next locale-keyed lookup in
+   `src/critic/` would re-encounter the same bug.
+2. _Migrate `resolveBannerLocale` and `resolveCardLocale` to the new
+   helper in the same PR._ Tempting (DRY), but the transparency
+   resolvers are not buggy and their return types carry narrow
+   unions (`BannerLocale`, `CardLocale`) that a generic helper
+   would broaden. Out of scope for a bug-fix PR; tracked as a
+   follow-up if a third locale-keyed table appears or one of the
+   transparency resolvers gains a real bug.
+3. _Use `Intl.Locale` (Node ≥ 14)._ Heavier and would still leave the
+   bucket-mapping problem (`new Intl.Locale('de-DE').language === 'de'`
+   gives the language tag, but the table lookup still has to choose
+   which bucket to use). The chosen helper does both steps in one
+   call.
+
+**Out of scope.**
+
+- Adding new locales to `REFUSAL_PATTERNS` (the bug is about
+  resolving the existing two consistently).
+- Migrating the transparency-layer resolvers (alternative 2 above).
+- The LLM critic's locale handling — that runs through a separate
+  code path with its own locale-keyed prompts (see ADR-0007).
+
+**References.**
+
+- Issue #18 (the bug report)
+- ADR-0023 (transparency card, where the bug was first noticed)
+- `src/transparency/banner.ts` — `resolveBannerLocale`, the local
+  resolver that does not migrate in this PR
