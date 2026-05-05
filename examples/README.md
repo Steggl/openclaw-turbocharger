@@ -31,7 +31,7 @@ Both demonstrate `answerMode: 'single'` (reactive escalation) with:
   endpoint URL. The block is ignored unless `answerMode: 'chorus'`.
 - Transparency in `banner` mode (the technical default is `silent`).
 
-## What the examples do *not* show
+## What the examples do _not_ show
 
 ### `llmCritic` is absent
 

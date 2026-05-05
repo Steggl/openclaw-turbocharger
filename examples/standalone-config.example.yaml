@@ -98,8 +98,8 @@ escalation:
 # ignored otherwise. Per ADR-0020 the dispatch is hard-fail —
 # no silent fallback to single mode if the endpoint is down.
 chorus:
-  endpoint: https://chorus.example.com/v1     # required when answerMode is 'chorus'
-  timeoutMs: 90000                            # optional, default unset
+  endpoint: https://chorus.example.com/v1 # required when answerMode is 'chorus'
+  timeoutMs: 90000 # optional, default unset
 
 # Transparency layer. The technical default is 'silent' — set
 # mode below to opt in to user-visible escalation annotations.
@@ -108,4 +108,4 @@ chorus:
 # is locale-aware (en/de) and only injects when escalation
 # depth > 0.
 transparency:
-  mode: banner                                # banner | silent | card
+  mode: banner # banner | silent | card
