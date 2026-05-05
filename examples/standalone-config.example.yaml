@@ -1,70 +1,111 @@
 # openclaw-turbocharger — standalone config example
 #
-# Status: ILLUSTRATIVE. This example mirrors the type surface in
-# src/types.ts but is not yet validated against a live schema (schema
-# lands with issue #11). Keys and types may still change before
-# v0.1.0-alpha. See docs/CONFIGURATION.md for the field-by-field
-# reference.
+# Status: VALIDATED. This example is schema-conformant against
+# `TurbochargerConfigSchema` in `src/config/schema.ts` as of
+# v0.1.0-alpha.0. Operators can copy this file, adapt the values,
+# and load it via `TURBOCHARGER_CONFIG=/path/to/config.yaml`. See
+# docs/CONFIGURATION.md for the field-by-field reference.
+#
+# Top level is flat: AppConfig fields (port, downstreamBaseUrl,
+# downstreamApiKey) sit alongside the optional sub-configs
+# (orchestrator, escalation, chorus, transparency, answerMode).
+# Field names are camelCase.
 
-turbocharger:
-  port: 11435
-  downstream_base_url: http://localhost:11434/v1
+port: 11435
+downstreamBaseUrl: http://localhost:11434/v1
 
-  # Top-level paradigm: 'single' (default) for reactive escalation, or
-  # 'chorus' for direct dispatch to a multi-model consensus endpoint.
-  # Per ADR-0021 these are orthogonal answer modes, not stages of the
-  # same process.
-  answer_mode: single
+# downstreamApiKey: sk-...                 # optional, omit for local providers
 
-  # Adequacy critic (single mode). Skipped entirely in chorus mode.
-  orchestrator:
-    threshold: 0.6
-    grey_band: [0.30, 0.60]
-    weights:
-      refusal: 1.0
-      truncation: 1.0
-      repetition: 1.0
-      empty: 1.0
-      tool_error: 1.0
-      syntax_error: 1.0
-    llm_critic:
-      base_url: http://localhost:11434/v1
-      model: qwen2.5:7b
-      budget_usd: 0.01
+# Top-level paradigm: 'single' (default) for reactive escalation, or
+# 'chorus' for direct dispatch to a multi-model consensus endpoint.
+# Per ADR-0021 these are orthogonal answer modes, not stages of the
+# same process. When 'chorus' is set, the chorus block below is
+# required.
+answerMode: single
 
-  # Escalation strategy (single mode + escalate decision). Per
-  # ADR-0021, chorus is no longer an escalation mode — it lives
-  # under its own top-level 'chorus' section below.
-  escalation:
-    # ladder | max
-    mode: ladder
+# Adequacy critic for the 'single' answer mode. Skipped entirely
+# when answerMode is 'chorus'.
+orchestrator:
+  # Aggregate score above which an escalation fires. Hard signals
+  # are combined via noisy-OR, so 0.6 means roughly "any single
+  # high-confidence signal escalates, two medium signals escalate".
+  threshold: 0.6
 
-    # Ordered chain used by the 'ladder' strategy. Each step is a
-    # model id the downstream target understands.
-    ladder:
-      - ollama/qwen2.5:7b
-      - anthropic/claude-haiku-4-5
-      - anthropic/claude-sonnet-4-6
-      - anthropic/claude-opus-4-7
+  # Score range where the LLM critic (if configured in code) is
+  # consulted for tie-breaking. Below the lower bound the
+  # orchestrator passes; above the upper bound it escalates;
+  # in between it asks the LLM critic. With no llmCritic the
+  # grey band still applies — the orchestrator just treats the
+  # uncertain range as "pass" by default.
+  greyBand: [0.30, 0.60]
 
-    # Target used by the 'max' strategy (single jump). Required
-    # when mode is 'max'; ignored in 'ladder' mode.
-    max_model: anthropic/claude-opus-4-7
+  # Per-category weights applied before noisy-OR aggregation.
+  # All six categories are required. Values must be in [0, 1].
+  # Note: the keys here are SignalCategory values (snake_case in
+  # the runtime types), not config field names — they stay as-is.
+  weights:
+    refusal: 1.0
+    truncation: 1.0
+    repetition: 1.0
+    empty: 1.0
+    tool_error: 1.0
+    syntax_error: 1.0
 
-    # Maximum consecutive escalations per request (prevents runaway
-    # costs). Per ADR-0018, 2 is the recommended default.
-    max_depth: 2
+  # Optional LLM critic. Cannot be configured purely from YAML —
+  # the loader can populate the static fields below, but the
+  # actual `run` callable that calls the LLM has to be assembled
+  # in code and merged onto the loaded config before passing it
+  # to startServer. See docs/CONFIGURATION.md for the in-code
+  # wiring pattern.
+  #
+  # llmCritic:
+  #   baseUrl: http://localhost:11434/v1
+  #   model: qwen2.5:7b
+  #   apiKey: sk-...                       # optional
+  #   timeoutMs: 30000                     # optional
+  #   budgetUsd: 0.01                      # optional
+  #   pricing:                             # optional
+  #     promptUsdPerKToken: 0.0
+  #     completionUsdPerKToken: 0.0
 
-  # Chorus configuration (chorus mode only). Active when
-  # answer_mode is 'chorus'; ignored otherwise. Per ADR-0020 the
-  # dispatch is hard-fail — no silent fallback to single mode.
-  chorus:
-    endpoint: null # set to a chorus endpoint URL, e.g. openclaw-chorus
-    timeout_ms: 90000
+# Escalation strategy for the 'single' answer mode. Active when
+# the orchestrator returns 'escalate'. Per ADR-0021, chorus is
+# not an escalation mode — it lives under its own top-level
+# 'chorus' section below.
+escalation:
+  # 'ladder' walks the chain step-by-step (one re-query per
+  # escalation), 'max' jumps directly to the maxModel.
+  mode: ladder
 
-  # Transparency layer. The technical default is silent — set
-  # mode: banner below to opt in to user-visible escalation
-  # annotations. See ADR-0022.
-  transparency:
-    # banner | silent (card lands with issue #10)
-    mode: banner
+  # Ordered chain used by the 'ladder' strategy. Each entry is a
+  # model id the downstream target understands.
+  ladder:
+    - qwen2.5:7b
+    - anthropic/claude-haiku-4-5
+    - anthropic/claude-sonnet-4-6
+    - anthropic/claude-opus-4-7
+
+  # Target used by the 'max' strategy (single jump). Required
+  # when mode is 'max'; ignored when mode is 'ladder'.
+  maxModel: anthropic/claude-opus-4-7
+
+  # Maximum consecutive escalations per request. Prevents runaway
+  # costs if the critic keeps firing. Per ADR-0018, 2 is the
+  # recommended default.
+  maxDepth: 2
+
+# Chorus configuration. Active when answerMode is 'chorus';
+# ignored otherwise. Per ADR-0020 the dispatch is hard-fail —
+# no silent fallback to single mode if the endpoint is down.
+chorus:
+  endpoint: https://chorus.example.com/v1     # required when answerMode is 'chorus'
+  timeoutMs: 90000                            # optional, default unset
+
+# Transparency layer. The technical default is 'silent' — set
+# mode below to opt in to user-visible escalation annotations.
+# 'banner' prepends a one-line note. 'card' injects a structured
+# Markdown block describing the decision. Per ADR-0023 the card
+# is locale-aware (en/de) and only injects when escalation
+# depth > 0.
+transparency:
+  mode: banner                                # banner | silent | card
