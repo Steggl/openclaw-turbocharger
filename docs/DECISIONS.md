@@ -1655,3 +1655,159 @@ resolvers stay where they are.
 - ADR-0023 (transparency card, where the bug was first noticed)
 - `src/transparency/banner.ts` — `resolveBannerLocale`, the local
   resolver that does not migrate in this PR
+
+## ADR-0027: Plugin SDK direction — sidecar stays standalone, adapter lives in a separate package
+
+**Status:** accepted (issue #22, direction-setting; concrete decisions deferred to follow-ups)
+
+**Context.** Issue #22 calls for a "native OpenClaw plugin adapter and
+community.md listing." The repo currently ships a placeholder
+`openclaw.plugin.json` with `_note_*` markers explaining that no
+functional adapter exists yet. With v0.1.0-alpha.0 shipped and
+end-to-end validated, the next step is to clarify how
+openclaw-turbocharger will integrate with OpenClaw's plugin system.
+
+The OpenClaw plugin documentation (`docs.openclaw.ai/plugins/{manifest,
+architecture,reference,manage-plugins}.md`) makes the architecture
+explicit:
+
+- A native OpenClaw plugin is a TypeScript package loaded into the
+  OpenClaw process. It registers capabilities via
+  `api.registerProvider(...)` and similar calls inside plugin code,
+  not in the static `openclaw.plugin.json` manifest. The manifest is
+  read-without-execution metadata only — identity, `configSchema`,
+  UI hints, capability snapshots.
+- The plugin reference table catalogs ~110 plugins. Provider plugins
+  for OpenAI-compatible HTTP backends — `@openclaw/litellm-provider`,
+  `@openclaw/openrouter-provider` — are thin TypeScript adapters that
+  speak OpenAI wire format to a separately-running service. The
+  service itself is not the plugin.
+- For external plugins (anything not bundled with OpenClaw core), the
+  documented compatibility stance is conservative: existing external
+  plugins should keep hook-based integrations working as the
+  compatibility baseline; new bundled plugins should prefer explicit
+  capability registration; external plugins adopting capability
+  registration are allowed but should treat capability-specific
+  helper surfaces as evolving unless docs mark them stable.
+- Users install plugins via `openclaw plugins install npm:<package>`
+  (with ClawHub fallback), then `openclaw gateway restart`. Discovery
+  is package-name-based.
+
+The implication is structural: openclaw-turbocharger-the-sidecar (a
+Hono HTTP server) and openclaw-turbocharger-the-OpenClaw-plugin (a
+TypeScript adapter calling the OpenClaw plugin SDK) are disjoint
+codebases. The sidecar has no compile-time dependency on OpenClaw and
+runs with or without it. The plugin has no compile-time dependency on
+Hono and runs only inside an OpenClaw process. Conflating them in one
+single npm package would force every user to install both halves
+regardless of which one they want.
+
+**Decision.** Treat the plugin adapter as a separate npm package,
+distinct from the sidecar published at `@steggl/openclaw-turbocharger`.
+The adapter package's job is narrow: register a Provider capability
+with OpenClaw, forward requests to a configured sidecar URL via the
+OpenAI-compatible wire format, and surface the sidecar's transparency
+headers (`X-Turbocharger-*`) to OpenClaw's logging surfaces.
+
+The sidecar repo (this repo) keeps `openclaw.plugin.json` as a
+placeholder with refreshed notes pointing to this ADR and to the
+not-yet-existing adapter package. Removing the file outright would be
+a stronger architectural claim — "this repo will never carry plugin
+metadata" — that we are not ready to make.
+
+**Open questions, intentionally deferred but with explicit defaults.**
+
+- _Where does the adapter package live?_ The default recommendation is
+  a monorepo using pnpm workspaces, with `packages/sidecar` (today's
+  repo content) and `packages/plugin` (the new adapter). This keeps a
+  solo maintainer working in one CI, one issue tracker, one branch
+  strategy, while still letting each package declare its own
+  dependencies and release independently. Type definitions like the
+  shape of the `X-Turbocharger-*` header set can be shared via a
+  workspace-protocol dependency without publishing intermediate
+  libraries. Alternatives considered: a separate repo
+  `Steggl/openclaw-turbocharger-plugin` (cleaner trust boundary but
+  doubles maintenance), a single package with multi-entry-point
+  exports (simplest but couples Hono and OpenClaw plugin SDK as
+  runtime dependencies for everyone), and a subdirectory without
+  workspaces (worst of both: separate `package.json` with no clean
+  inter-package import path). The default is revisable when the
+  plugin-code follow-up issue opens, but the bar for switching off
+  it should be a concrete reason workspaces don't fit.
+
+- _Capability registration vs hook-only?_ The default recommendation
+  is capability registration via `api.registerProvider`. The OpenClaw
+  docs identify this as the intended direction, and the resulting
+  plugin shape (`plain-capability`) gives users the right UX —
+  `openclaw plugins inspect openclaw-turbocharger` will show a
+  registered provider, not an opaque hook. The "evolving" tag on
+  capability-helper surfaces is a real risk but not a present cost:
+  when a concrete breaking change lands, a hook-based fallback can
+  be added with bounded scope. Choosing hook-only first would be
+  defensive engineering against a break that hasn't happened yet,
+  at the price of building against a pattern the docs already mark
+  as legacy. The default is revisable when the plugin-code follow-up
+  reads the SDK source and finds a concrete reason capability
+  registration is unworkable today.
+
+**Alternatives considered.**
+
+1. _Single combined npm package — sidecar and plugin in one._ Smallest
+   distribution surface but couples runtime dependencies that
+   shouldn't be coupled: every sidecar install pulls the OpenClaw
+   plugin SDK; every plugin install pulls Hono. Also forces
+   lockstep versioning where independent cadences would serve
+   users better.
+2. _Ship no plugin at all, document the custom-provider-config path
+   only._ Honest about today's state but gives up on first-class
+   OpenClaw integration permanently. The docs path works (it's
+   how ADR-0027 expects users to integrate _today_), but a real
+   plugin gives `openclaw plugins inspect` and ClawHub
+   discoverability that no amount of README polish replicates.
+3. _Channel plugin or memory plugin variant._ Wrong capability
+   category. openclaw-turbocharger sits in the model-inference
+   path, not the messaging or memory paths. The plugin reference
+   table already shows clean separation between provider plugins
+   (the right category for us) and channel/memory plugins.
+
+**Out of scope for issue #22, deferred to follow-ups.**
+
+- The plugin adapter code itself. A new tracking issue should open
+  before implementation, with the two open questions above as its
+  prerequisites.
+- ClawHub or community.md listing. Per the day-of-decision: listing
+  comes after the adapter is functional and validated, not before.
+- Channel-plugin or memory-plugin variants. openclaw-turbocharger is
+  a provider-side sidecar; channel and memory shapes are unrelated
+  capability categories.
+- Removing or repurposing `openclaw.plugin.json`. The placeholder
+  stays, with refreshed `_note_*` fields that point to this ADR.
+
+**Consequences.**
+
+- The sidecar's release cadence stays decoupled from OpenClaw SDK
+  churn. v0.1.0-alpha.0 already shipped and works without OpenClaw
+  at all.
+- Users who want OpenClaw integration today follow the README's
+  "use as a custom OpenAI-compatible provider" path. This is
+  documented but not first-class — a follow-up README PR should
+  make it more discoverable.
+- The placeholder `openclaw.plugin.json` continues to exist as
+  documentation rather than function. Its `_note_*` fields get
+  updated alongside this ADR to reflect the changed understanding.
+- Issue #22 stays open until at least one of the two deferred
+  questions has a concrete answer and a tracking issue for the
+  adapter package is filed.
+
+**References.**
+
+- Issue #22 (the tracking issue this ADR closes the research phase of)
+- `https://docs.openclaw.ai/plugins/architecture` — public capability
+  model, plugin shapes, external-compatibility stance
+- `https://docs.openclaw.ai/plugins/manifest` — `openclaw.plugin.json`
+  schema (required `id` + `configSchema`; optional `kind`,
+  `providers`, `channels`, etc.)
+- `https://docs.openclaw.ai/plugins/manage-plugins` — install,
+  enable, restart, inspect workflow
+- `openclaw.plugin.json` — placeholder file updated alongside this
+  ADR with refreshed `_note_*` fields
