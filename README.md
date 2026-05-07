@@ -172,13 +172,13 @@ configuration shape.
 The MVP is complete. Post-v0.1.0-alpha work is tracked in the issue
 tracker on GitHub. Notable items:
 
-- **#22 `plugin-sdk`** — native OpenClaw plugin adapter and an entry
-  on `plugins/community.md`. v0.1.0-alpha ships as a standalone
-  OpenAI-compatible HTTP sidecar; OpenClaw users can already
-  configure it as a custom provider URL. #22 adds first-class plugin
-  integration via the OpenClaw plugin SDK so that
-  `openclaw plugins install @steggl/openclaw-turbocharger` works
-  end-to-end.
+- **#22 `plugin-sdk`** — research phase complete (ADR-0027); the
+  Provider plugin scaffold lives in [`plugin/`](./plugin/) on
+  `main` and is tracked as [issue #32](https://github.com/Steggl/openclaw-turbocharger/issues/32).
+  Publish to npm (`@steggl/openclaw-turbocharger-provider`) and
+  end-to-end validation against a real OpenClaw process are still
+  pending. See [Use with OpenClaw](#use-with-openclaw) below for the
+  current integration paths.
 
 See [`CHANGELOG.md`](./CHANGELOG.md) for the v0.1.0-alpha.0 release
 notes and [`docs/RELEASING.md`](./docs/RELEASING.md) for how releases
@@ -253,6 +253,41 @@ of them in one edit. See
 [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md) for the full
 field-by-field reference and [ADR-0024](./docs/DECISIONS.md) for
 the design.
+
+## Use with OpenClaw
+
+openclaw-turbocharger ships a thin Provider plugin in [`plugin/`](./plugin/)
+that registers the sidecar as a Provider inside OpenClaw. Once
+installed, OpenClaw routes chat completions through the sidecar's
+HTTP endpoint; the reactive-escalation logic runs transparently, and
+the sidecar's `X-Turbocharger-*` response headers describe what
+happened.
+
+### Native plugin (in development)
+
+```bash
+openclaw plugins install npm:@steggl/openclaw-turbocharger-provider
+openclaw gateway restart
+```
+
+The setup wizard prompts for the sidecar base URL (default
+`http://localhost:11435/v1`), an optional API key, and a
+comma-separated list of model IDs. See
+[`plugin/README.md`](./plugin/README.md) for full configuration
+details.
+
+> **Status:** the plugin scaffold is in `main` but not yet published
+> to npm. Track publish status at
+> [issue #32](https://github.com/Steggl/openclaw-turbocharger/issues/32).
+
+### Manual configuration (works today)
+
+If you prefer not to wait for the plugin or want to test the sidecar
+without it, configure openclaw-turbocharger as a custom
+OpenAI-compatible provider in your OpenClaw config. The sidecar
+serves a standard `/v1/chat/completions` endpoint, so any
+`api: "openai-completions"` provider entry pointing at the
+sidecar's URL works.
 
 ## Development
 
