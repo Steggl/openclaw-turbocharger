@@ -31,11 +31,11 @@ openclaw gateway restart
 
 The setup wizard prompts for three values:
 
-| Prompt | Default | Notes |
-|---|---|---|
-| Sidecar base URL | `http://localhost:11435/v1` | Must end in `/v1`. Auto-appended if you omit it. |
-| API key | _(empty)_ | Optional. Leave blank if your sidecar runs without auth. |
-| Model IDs | `anthropic/claude-haiku-4-5, anthropic/claude-sonnet-4-6, anthropic/claude-opus-4-7, qwen2.5:7b` | Comma-separated. Edit during setup or later via `openclaw config`. |
+| Prompt           | Default                                                                                          | Notes                                                              |
+| ---------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| Sidecar base URL | `http://localhost:11435/v1`                                                                      | Must end in `/v1`. Auto-appended if you omit it.                   |
+| API key          | _(empty)_                                                                                        | Optional. Leave blank if your sidecar runs without auth.           |
+| Model IDs        | `anthropic/claude-haiku-4-5, anthropic/claude-sonnet-4-6, anthropic/claude-opus-4-7, qwen2.5:7b` | Comma-separated. Edit during setup or later via `openclaw config`. |
 
 The wizard writes a `models.providers.openclaw-turbocharger` entry
 into your OpenClaw config; OpenClaw uses that entry to route
