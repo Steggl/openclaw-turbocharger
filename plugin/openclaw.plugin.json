@@ -1,0 +1,28 @@
+{
+  "id": "openclaw-turbocharger",
+  "name": "openclaw-turbocharger",
+  "description": "Reactive escalation sidecar for OpenAI-compatible providers",
+  "activation": {
+    "onStartup": false
+  },
+  "enabledByDefault": true,
+  "providers": ["openclaw-turbocharger"],
+  "autoEnableWhenConfiguredProviders": ["openclaw-turbocharger"],
+  "providerAuthChoices": [
+    {
+      "provider": "openclaw-turbocharger",
+      "method": "local",
+      "choiceId": "openclaw-turbocharger",
+      "choiceLabel": "openclaw-turbocharger",
+      "choiceHint": "Reactive escalation sidecar — base URL + models",
+      "groupId": "openclaw-turbocharger",
+      "groupLabel": "openclaw-turbocharger",
+      "groupHint": "Reactive escalation sidecar"
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
