@@ -8,6 +8,52 @@ project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added — OpenClaw provider plugin
+
+- `plugin/` subdirectory with `@steggl/openclaw-turbocharger-provider`
+  v0.1.0-alpha.0 scaffold: a thin OpenClaw Provider plugin that
+  registers the sidecar via `api.registerProvider` and forwards
+  configuration through OpenClaw's setup wizard (sidecar URL,
+  optional API key, comma-separated model IDs). Modeled on the
+  bundled `extensions/copilot-proxy` plugin in the OpenClaw
+  monorepo. Not yet published to npm; tracked at
+  [#32](https://github.com/Steggl/openclaw-turbocharger/issues/32).
+
+### Fixed
+
+- Refusal detector now resolves BCP-47 locale tags (`de-DE`,
+  `de_DE`, mixed case, longest-prefix wins) to the correct
+  pattern bucket via a new `resolveLocale` helper in
+  `src/locale.ts`. Previously these region-qualified tags fell
+  back to English-only patterns and missed German-language
+  refusals. (#18, ADR-0026)
+
+### Documented
+
+- ADR-0026 in `docs/DECISIONS.md`: BCP-47 locale resolution helper.
+- ADR-0027 in `docs/DECISIONS.md`: plugin SDK direction. Sidecar
+  stays standalone; the OpenClaw adapter is a separate npm package.
+- `docs/RELEASING.md` "First-release gotchas" section: the three
+  release-day stumbling blocks from 0.1.0-alpha.0 (npm
+  auto-`latest` on first publish, `gh auth refresh` for
+  `write:packages` scope, GHCR default-private packages).
+- `examples/standalone-config.example.yaml` and
+  `examples/openclaw-config.example.json` refreshed to be
+  schema-conformant against `TurbochargerConfigSchema` (camelCase,
+  flat top-level, no `turbocharger:` wrapper). Status:
+  ILLUSTRATIVE → VALIDATED. New `examples/README.md` documents
+  both files plus the absence of `llmCritic`.
+- README `## Use with OpenClaw` section added between Configuration
+  and Development. Both integration paths covered (native plugin,
+  manual custom-provider config).
+
+### Changed
+
+- Root `openclaw.plugin.json` `_note_*` fields refreshed twice in
+  this cycle: first to point at ADR-0027 as the direction-setting
+  decision, then to point at `plugin/openclaw.plugin.json` as the
+  functional manifest after #32 PR-A landed.
+
 ## [0.1.0-alpha.0] — 2026-05-02
 
 First published alpha release. All 15 MVP issues from `PROJECT_BRIEF.md`
