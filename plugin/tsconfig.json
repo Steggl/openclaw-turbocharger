@@ -10,5 +10,5 @@
     "verbatimModuleSyntax": true,
     "resolveJsonModule": true
   },
-  "include": ["index.ts"]
+  "include": ["index.ts", "wizard.ts", "test/**/*.ts"]
 }
