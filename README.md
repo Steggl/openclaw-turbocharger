@@ -173,12 +173,13 @@ The MVP is complete. Post-v0.1.0-alpha work is tracked in the issue
 tracker on GitHub. Notable items:
 
 - **#22 `plugin-sdk`** — research phase complete (ADR-0027); the
-  Provider plugin scaffold lives in [`plugin/`](./plugin/) on
-  `main` and is tracked as [issue #32](https://github.com/Steggl/openclaw-turbocharger/issues/32).
-  Publish to npm (`@steggl/openclaw-turbocharger-provider`) and
-  end-to-end validation against a real OpenClaw process are still
-  pending. See [Use with OpenClaw](#use-with-openclaw) below for the
-  current integration paths.
+  Provider plugin is published as
+  [`@steggl/openclaw-turbocharger-provider`](https://www.npmjs.com/package/@steggl/openclaw-turbocharger-provider)
+  on npm (v0.1.0-alpha.0, tagged `plugin/v0.1.0-alpha.0`).
+  End-to-end validation against a real OpenClaw process is still
+  pending; tracked at
+  [issue #32](https://github.com/Steggl/openclaw-turbocharger/issues/32)
+  (Sub-Test 4). See [Use with OpenClaw](#use-with-openclaw) below.
 
 See [`CHANGELOG.md`](./CHANGELOG.md) for the v0.1.0-alpha.0 release
 notes and [`docs/RELEASING.md`](./docs/RELEASING.md) for how releases
@@ -263,7 +264,7 @@ HTTP endpoint; the reactive-escalation logic runs transparently, and
 the sidecar's `X-Turbocharger-*` response headers describe what
 happened.
 
-### Native plugin (in development)
+### Native plugin (alpha)
 
 ```bash
 openclaw plugins install npm:@steggl/openclaw-turbocharger-provider
@@ -276,9 +277,12 @@ comma-separated list of model IDs. See
 [`plugin/README.md`](./plugin/README.md) for full configuration
 details.
 
-> **Status:** the plugin scaffold is in `main` but not yet published
-> to npm. Track publish status at
-> [issue #32](https://github.com/Steggl/openclaw-turbocharger/issues/32).
+> **Status:** the plugin is published as
+> [`@steggl/openclaw-turbocharger-provider@0.1.0-alpha.0`](https://www.npmjs.com/package/@steggl/openclaw-turbocharger-provider)
+> on npm. End-to-end validation against a real OpenClaw process is
+> still pending; tracked at
+> [issue #32](https://github.com/Steggl/openclaw-turbocharger/issues/32)
+> (Sub-Test 4).
 
 ### Manual configuration (works today)
 
