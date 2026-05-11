@@ -14,8 +14,15 @@
       "./index.ts"
     ]
   },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
   "devDependencies": {
-    "openclaw": ">=2026.5.6"
+    "openclaw": ">=2026.5.6",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
   },
   "repository": {
     "type": "git",
