@@ -5,9 +5,10 @@
   "type": "module",
   "main": "./index.ts",
   "files": [
+    "README.md",
     "index.ts",
     "openclaw.plugin.json",
-    "README.md"
+    "wizard.ts"
   ],
   "openclaw": {
     "extensions": [
